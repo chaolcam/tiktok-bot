@@ -48,14 +48,14 @@ async def download_twitter(url: str) -> list:
         if 'x.com' in url:
             url = url.replace('x.com', 'twitter.com')  # x.com -> twitter.com
         
-        # Twitter API45 kullanımı
+        # Twitter241 API kullanımı
         headers = {
             "X-RapidAPI-Key": TWITTER_API_KEY,
-            "X-RapidAPI-Host": "twitter-api45.p.rapidapi.com"
+            "X-RapidAPI-Host": "twitter241.p.rapidapi.com"
         }
         params = {"url": url}
         response = requests.get(
-            "https://twitter-api45.p.rapidapi.com/tweet.php",
+            "https://twitter241.p.rapidapi.com/tweet",
             headers=headers,
             params=params
         )
