@@ -1,7 +1,7 @@
 import os
 import logging
 import requests
-from telegram import Update, InputMediaVideo, InputMediaPhoto
+from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # Ortam Değişkenleri
@@ -16,10 +16,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Kullanıcıya başlangıç mesajı gönderir."""
     await update.message.reply_text('🎉 Merhaba! TikTok linklerini gönder.')
 
 async def download_tiktok(url: str) -> list:
-    """TikTok videolarını ve resimlerini API ile indirir"""
+    """TikTok videolarını ve resimlerini API ile indirir."""
     try:
         headers = {
             "X-RapidAPI-Key": TIKTOK_API_KEY,
@@ -49,6 +50,7 @@ async def download_tiktok(url: str) -> list:
         return []
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Kullanıcıdan gelen mesajı işler ve TikTok medyasını gönderir."""
     url = update.message.text
     
     try:
@@ -59,24 +61,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("❌ Desteklenmeyen link formatı")
                 return
 
-            # Medya gruplarını 10'lu parçalara böl
-            for i in range(0, len(media_urls), 10):
-                media_group = []
-                for media_url in media_urls[i:i+10]:
+            # Her bir medya öğesini tek tek gönder
+            for media_url in media_urls:
+                try:
                     if media_url.endswith('.mp4'):
-                        media_group.append(InputMediaVideo(requests.get(media_url).content))
+                        await update.message.reply_video(video=media_url)
                     else:
-                        media_group.append(InputMediaPhoto(requests.get(media_url).content))
-                
-                # Medya grubunu gönder
-                await update.message.reply_media_group(media=media_group)
-                logger.info(f"✅ TikTok medya grubu gönderildi: {len(media_group)} öğe")
+                        await update.message.reply_photo(photo=media_url)
+                    logger.info(f"✅ TikTok medya gönderildi: {media_url}")
+                except Exception as e:
+                    logger.error(f"⛔ Medya gönderim hatası: {str(e)}")
+                    await update.message.reply_text(f"⚠️ Medya gönderilirken hata oluştu: {str(e)}")
 
     except Exception as e:
         logger.error(f"⛔ Kritik hata: {str(e)}")
         await update.message.reply_text(f"⚠️ Üzgünüm, şu hata oluştu:\n{str(e)}")
 
 if __name__ == '__main__':
+    # Botu başlat
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
