@@ -45,7 +45,7 @@ async def download_twitter(url: str) -> list:
         if 'x.com' in url:
             url = url.replace('x.com', 'twitter.com')  # x.com -> twitter.com
         
-        # RapidAPI kullanımı (Örnek API)
+        # Twitter API45 kullanımı
         headers = {
             "X-RapidAPI-Key": TWITTER_API_KEY,
             "X-RapidAPI-Host": "twitter-api45.p.rapidapi.com"
@@ -57,6 +57,9 @@ async def download_twitter(url: str) -> list:
             params=params
         )
         data = response.json()
+        
+        # API yanıtını logla
+        logger.info(f"Twitter/X API Yanıtı: {data}")
         
         # Medya URL'lerini çek
         media_urls = []
