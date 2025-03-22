@@ -35,7 +35,7 @@ async def download_twitter(url: str) -> list:
         }
         params = {"url": url}
         response = requests.get(
-            "https://social-download-all-in-one.p.rapidapi.com/v1/social",
+            "https://social-download-all-in-one.p.rapidapi.com/v1/download",  # Doğru endpoint
             headers=headers,
             params=params
         )
