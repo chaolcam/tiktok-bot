@@ -1,14 +1,14 @@
-import playwright
-playwright.install()
 import os
 import logging
 import requests
 from telegram import Update, InputMediaVideo, InputMediaPhoto
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from playwright.async_api import async_playwright
 
+# Ortam Değişkenleri
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+TIKTOK_API_KEY = os.getenv('TIKTOK_API_KEY')  # RapidAPI'den alınan API anahtarı
 
+# Loglama Ayarları
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -19,32 +19,33 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text('🎉 Merhaba! TikTok/Twitter linklerini gönder.')
 
 async def download_tiktok(url: str) -> str:
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"]
-        )
-        page = await browser.new_page()
-        try:
-            await page.goto("https://snaptik.app/", timeout=120000)
-            await page.fill("input#url", url)
-            await page.click("button[type='submit']")
-            await page.wait_for_selector(".download-link", timeout=60000)
-            download_element = await page.query_selector(".download-link >> a")
-            return await download_element.get_attribute("href")
-        except Exception as e:
-            logger.error(f"TikTok Hatası: {str(e)}")
-            raise
-        finally:
-            await browser.close()
-
-async def download_twitter(url: str) -> list:
+    """TikTok videosunu API ile indirir"""
     try:
-        # TEST İÇİN GEÇERLİ BİR MEDYA URL'Sİ (Örnek YouTube video)
-        return ["https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"]
+        headers = {
+            "X-RapidAPI-Key": TIKTOK_API_KEY,
+            "X-RapidAPI-Host": "tiktok-video-no-watermark2.p.rapidapi.com"
+        }
+        params = {"url": url}
+        response = requests.get(
+            "https://tiktok-video-no-watermark2.p.rapidapi.com/",
+            headers=headers,
+            params=params
+        )
+        data = response.json()
+        return data["data"]["play"]  # İndirilebilir video URL'si
     except Exception as e:
-        logger.error(f"Twitter Hatası: {str(e)}")
-        return []
+        logger.error(f"TikTok API Hatası: {str(e)}")
+        raise
+
+async def download_twitter(url: str) -> str:
+    """Twitter videosunu API ile indirir"""
+    try:
+        response = requests.get(f"https://twitsave.com/info?url={url}")
+        data = response.json()
+        return data["video"][0]["url"]  # İndirilebilir video URL'si
+    except Exception as e:
+        logger.error(f"Twitter API Hatası: {str(e)}")
+        raise
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text
@@ -55,25 +56,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             video_url = await download_tiktok(url)
             media_content = requests.get(video_url).content
             media_group.append(InputMediaVideo(media_content))
-            logger.info("TikTok Başarılı")
+            logger.info("✅ TikTok video indirildi")
 
         elif 'twitter.com' in url:
-            media_urls = await download_twitter(url)
-            for media_url in media_urls:
-                if media_url.endswith('.mp4'):
-                    media_group.append(InputMediaVideo(requests.get(media_url).content))  # Düzeltildi
-                else:
-                    media_group.append(InputMediaPhoto(requests.get(media_url).content))  # Düzeltildi
-            logger.info("Twitter Başarılı")
+            video_url = await download_twitter(url)
+            media_content = requests.get(video_url).content
+            media_group.append(InputMediaVideo(media_content))
+            logger.info("✅ Twitter video indirildi")
 
         if media_group:
             await update.message.reply_media_group(media=media_group)
         else:
-            await update.message.reply_text("❌ Desteklenmeyen Link")
+            await update.message.reply_text("❌ Desteklenmeyen link formatı")
 
     except Exception as e:
-        logger.error(f"Kritik Hata: {str(e)}")
-        await update.message.reply_text(f"⚠️ Hata: {str(e)}")
+        logger.error(f"⛔ Kritik hata: {str(e)}")
+        await update.message.reply_text(f"⚠️ Üzgünüm, şu hata oluştu:\n{str(e)}")
 
 if __name__ == '__main__':
     app = Application.builder().token(TOKEN).build()
