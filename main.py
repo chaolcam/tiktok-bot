@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackContext
@@ -22,28 +23,36 @@ async def start(update: Update, context: CallbackContext):
 
 # Mesaj işleme
 async def handle_message(update: Update, context: CallbackContext):
-    url = update.message.text
-    if "tiktok.com" in url:
-        video_url, image_urls, story_url = download_tiktok_media(url)
-        
-        # Video varsa gönder
-        if video_url:
-            await update.message.reply_video(video_url)
-        
-        # Resimler varsa gönder (birden fazla resim olabilir)
-        if image_urls:
-            for image_url in image_urls:
-                await update.message.reply_photo(image_url)
-        
-        # Hikaye varsa gönder
-        if story_url:
-            await update.message.reply_video(story_url)
-        
-        # Hiçbir medya bulunamazsa
-        if not video_url and not image_urls and not story_url:
-            await update.message.reply_text('Üzgünüm, medya indirilemedi.')
-    else:
-        await update.message.reply_text('Lütfen geçerli bir TikTok linki gönderin.')
+    try:
+        url = update.message.text
+        if "tiktok.com" in url:
+            # Her istekten önce 1 saniye bekle
+            time.sleep(1)
+            
+            # Video, resim ve hikayeyi indir
+            video_url, image_urls, story_url = download_tiktok_media(url)
+            
+            # Video varsa gönder
+            if video_url:
+                await update.message.reply_video(video_url)
+            
+            # Resimler varsa gönder (birden fazla resim olabilir)
+            if image_urls:
+                for image_url in image_urls:
+                    await update.message.reply_photo(image_url)
+            
+            # Hikaye varsa gönder
+            if story_url:
+                await update.message.reply_video(story_url)
+            
+            # Hiçbir medya bulunamazsa
+            if not video_url and not image_urls and not story_url:
+                await update.message.reply_text('Üzgünüm, medya indirilemedi.')
+        else:
+            await update.message.reply_text('Lütfen geçerli bir TikTok linki gönderin.')
+    except Exception as e:
+        print(f"Hata: {e}")
+        await update.message.reply_text('Bir hata oluştu, lütfen daha sonra tekrar deneyin.')
 
 # Botu başlatma
 def main():
