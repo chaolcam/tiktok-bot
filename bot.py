@@ -40,10 +40,10 @@ async def download_tiktok(url: str) -> list:
         # Medya URL'lerini çek
         media_urls = []
         if "data" in data:
-            media_urls.append(data["data"]["play"])  # Video URL'si
+            if "play" in data["data"]:  # Video URL'si
+                media_urls.append(data["data"]["play"])
             if "images" in data["data"]:  # Resimler varsa
-                for image in data["data"]["images"]:
-                    media_urls.append(image)
+                media_urls.extend(data["data"]["images"])  # Tüm resimleri ekle
         return media_urls
     except Exception as e:
         logger.error(f"TikTok API Hatası: {str(e)}")
@@ -61,8 +61,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("❌ Desteklenmeyen link formatı")
                 return
 
-            # Her bir medya öğesini tek tek gönder
+            # Geçerli medya URL'lerini filtrele
+            valid_media_urls = []
             for media_url in media_urls:
+                if media_url and isinstance(media_url, str):  # Boş veya geçersiz URL'leri filtrele
+                    valid_media_urls.append(media_url)
+            
+            # Tüm medya öğelerini tek tek gönder
+            for media_url in valid_media_urls:
                 try:
                     if media_url.endswith('.mp4'):
                         await update.message.reply_video(video=media_url)
@@ -72,6 +78,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except Exception as e:
                     logger.error(f"⛔ Medya gönderim hatası: {str(e)}")
                     await update.message.reply_text(f"⚠️ Medya gönderilirken hata oluştu: {str(e)}")
+
+            # Kaç tane medya gönderildiğini logla
+            logger.info(f"Toplam {len(valid_media_urls)} medya gönderildi.")
 
     except Exception as e:
         logger.error(f"⛔ Kritik hata: {str(e)}")
