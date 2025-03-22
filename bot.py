@@ -6,7 +6,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 
 # Ortam Değişkenleri
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-SOCIAL_API_KEY = os.getenv('SOCIAL_API_KEY')  # RapidAPI'den alınan API anahtarı
+TWITTER_API_KEY = os.getenv('TWITTER_API_KEY')  # RapidAPI'den alınan API anahtarı
 
 # Loglama Ayarları
 logging.basicConfig(
@@ -16,7 +16,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text('🎉 Merhaba! TikTok ve X (Twitter) linklerini gönder.')
+    await update.message.reply_text('🎉 Merhaba! X (Twitter) linklerini gönder.')
 
 async def download_twitter(url: str) -> list:
     """Twitter/X videosunu RapidAPI ile indirir"""
@@ -28,14 +28,14 @@ async def download_twitter(url: str) -> list:
         if 'x.com' in url:
             url = url.replace('x.com', 'twitter.com')  # x.com -> twitter.com
         
-        # Social Download All-in-One API kullanımı
+        # Twitter/X Media Download API kullanımı
         headers = {
-            "X-RapidAPI-Key": SOCIAL_API_KEY,
-            "X-RapidAPI-Host": "social-download-all-in-one.p.rapidapi.com"
+            "X-RapidAPI-Key": TWITTER_API_KEY,
+            "X-RapidAPI-Host": "twitter-x-media-download.p.rapidapi.com"
         }
         params = {"url": url}
         response = requests.get(
-            "https://social-download-all-in-one.p.rapidapi.com/v1/download",  # Doğru endpoint
+            "https://twitter-x-media-download.p.rapidapi.com/v1/twitter",
             headers=headers,
             params=params
         )
