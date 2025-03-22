@@ -7,6 +7,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 # Ortam Değişkenleri
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TIKTOK_API_KEY = os.getenv('TIKTOK_API_KEY')  # RapidAPI'den alınan API anahtarı
+TWITTER_API_KEY = os.getenv('TWITTER_API_KEY')  # RapidAPI'den alınan API anahtarı
 
 # Loglama Ayarları
 logging.basicConfig(
@@ -38,14 +39,23 @@ async def download_tiktok(url: str) -> str:
         raise
 
 async def download_twitter(url: str) -> list:
-    """Twitter/X videosunu API ile indirir"""
+    """Twitter/X videosunu RapidAPI ile indirir"""
     try:
-        # Linki Twitsave API'sine uygun hale getir
+        # Linki Twitter/X API'sine uygun hale getir
         if 'x.com' in url:
             url = url.replace('x.com', 'twitter.com')  # x.com -> twitter.com
         
-        # Twitsave API kullanımı
-        response = requests.post("https://twitsave.com/info", data={"url": url})
+        # RapidAPI kullanımı (Örnek API)
+        headers = {
+            "X-RapidAPI-Key": TWITTER_API_KEY,
+            "X-RapidAPI-Host": "twitter-api45.p.rapidapi.com"
+        }
+        params = {"url": url}
+        response = requests.get(
+            "https://twitter-api45.p.rapidapi.com/tweet.php",
+            headers=headers,
+            params=params
+        )
         data = response.json()
         
         # Medya URL'lerini çek
