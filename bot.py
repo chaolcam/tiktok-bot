@@ -6,7 +6,6 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 
 # Ortam Değişkenleri
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-TIKTOK_API_KEY = os.getenv('TIKTOK_API_KEY')  # RapidAPI'den alınan API anahtarı
 TWITTER_API_KEY = os.getenv('TWITTER_API_KEY')  # RapidAPI'den alınan API anahtarı
 
 # Loglama Ayarları
@@ -17,26 +16,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text('🎉 Merhaba! TikTok ve X (Twitter) linklerini gönder.')
-
-async def download_tiktok(url: str) -> str:
-    """TikTok videosunu API ile indirir"""
-    try:
-        headers = {
-            "X-RapidAPI-Key": TIKTOK_API_KEY,
-            "X-RapidAPI-Host": "tiktok-video-no-watermark2.p.rapidapi.com"
-        }
-        params = {"url": url}
-        response = requests.get(
-            "https://tiktok-video-no-watermark2.p.rapidapi.com/",
-            headers=headers,
-            params=params
-        )
-        data = response.json()
-        return data["data"]["play"]  # İndirilebilir video URL'si
-    except Exception as e:
-        logger.error(f"TikTok API Hatası: {str(e)}")
-        raise
+    await update.message.reply_text('🎉 Merhaba! X (Twitter) linklerini gönder.')
 
 async def download_twitter(url: str) -> list:
     """Twitter/X videosunu RapidAPI ile indirir"""
@@ -59,10 +39,12 @@ async def download_twitter(url: str) -> list:
             headers=headers,
             params=params
         )
-        data = response.json()
         
         # API yanıtını logla
-        logger.info(f"Twitter/X API Yanıtı: {data}")
+        logger.info(f"Twitter/X API Yanıtı: {response.text}")
+        
+        # Yanıtı JSON'a dönüştür
+        data = response.json()
         
         # Medya URL'lerini çek
         media_urls = []
@@ -82,14 +64,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     media_group = []
     
     try:
-        if 'tiktok.com' in url:
-            # TikTok işlemleri
-            video_url = await download_tiktok(url)
-            media_content = requests.get(video_url).content
-            media_group.append(InputMediaVideo(media_content))
-            logger.info("✅ TikTok video indirildi")
-
-        elif 'twitter.com' in url or 'x.com' in url:
+        if 'twitter.com' in url or 'x.com' in url:
             # Twitter/X işlemleri
             media_urls = await download_twitter(url)
             for media_url in media_urls:
