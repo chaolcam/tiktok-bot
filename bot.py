@@ -1,3 +1,5 @@
+import playwright
+playwright.install()
 import os
 import logging
 import requests
