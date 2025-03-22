@@ -41,6 +41,9 @@ async def download_tiktok(url: str) -> str:
 async def download_twitter(url: str) -> list:
     """Twitter/X videosunu RapidAPI ile indirir"""
     try:
+        # Linki temizle (query parametrelerini kaldır)
+        url = url.split('?')[0]
+        
         # Linki Twitter/X API'sine uygun hale getir
         if 'x.com' in url:
             url = url.replace('x.com', 'twitter.com')  # x.com -> twitter.com
