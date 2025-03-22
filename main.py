@@ -1,5 +1,6 @@
 import os
 import requests
+from bs4 import BeautifulSoup
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackContext
 
@@ -15,15 +16,24 @@ def download_tiktok_media(url):
         return video_url, image_urls, None  # Hikaye URL'si henüz yok
     return None, None, None
 
-# TikTok hikayesi indirme fonksiyonu
+# TikTok hikayesi indirme fonksiyonu (web scraping)
 def download_tiktok_story(url):
-    # Hikaye için alternatif API
-    api_url = f"https://snaptik.app/api/v1/get?url={url}"
-    response = requests.get(api_url)
-    if response.status_code == 200:
-        data = response.json()
-        story_url = data.get('data', {}).get('story_url')
-        return story_url
+    try:
+        # TikTok sayfasını çek
+        response = requests.get(url)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Hikaye URL'sini bul
+            story_url = None
+            for meta_tag in soup.find_all('meta'):
+                if 'property' in meta_tag.attrs and meta_tag.attrs['property'] == 'og:video':
+                    story_url = meta_tag.attrs['content']
+                    break
+            
+            return story_url
+    except Exception as e:
+        print(f"Hata: {e}")
     return None
 
 # /start komutu
