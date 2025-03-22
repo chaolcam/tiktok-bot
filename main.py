@@ -5,15 +5,15 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 
 # TikTok video, resim ve hikaye indirme fonksiyonu
 def download_tiktok_media(url):
-    api_url = f"https://www.tikwm.com/api/?url={url}"
+    api_url = f"https://api.tiklydown.eu.org/api/download?url={url}"
     response = requests.get(api_url)
     if response.status_code == 200:
         data = response.json()
         # Video, resim veya hikaye URL'sini al
-        video_url = data.get('data', {}).get('play')
-        image_url = data.get('data', {}).get('images', [])  # Resimler (birden fazla olabilir)
-        story_url = data.get('data', {}).get('story')  # Hikaye URL'si
-        return video_url, image_url, story_url
+        video_url = data.get('video', {}).get('url')
+        image_urls = data.get('images', [])  # Resimler (birden fazla olabilir)
+        story_url = data.get('story', {}).get('url')  # Hikaye URL'si
+        return video_url, image_urls, story_url
     return None, None, None
 
 # /start komutu
