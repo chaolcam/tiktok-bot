@@ -39,7 +39,8 @@ async def handle_message(update: Update, _):
     try:
         if 'tiktok.com' in url:
             video_url = download_tiktok(url)
-            media_group.append(InputMediaVideo(requests.get(video_url).content)
+            # DÜZELTİLMİŞ KISIM (İki ")" eklendi)
+            media_group.append(InputMediaVideo(requests.get(video_url).content))
         
         if media_group:
             await update.message.reply_media_group(media=media_group)
