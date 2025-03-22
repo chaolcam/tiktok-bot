@@ -1,16 +1,16 @@
 import os
 import requests
-from telegram import Update
+from telegram import Update, InputMediaPhoto
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackContext
 
 # TikTok video ve resim indirme fonksiyonu
 def download_tiktok_media(url):
-    api_url = f"https://api.tiklydown.eu.org/api/download?url={url}"
+    api_url = f"https://www.tikwm.com/api/?url={url}"
     response = requests.get(api_url)
     if response.status_code == 200:
         data = response.json()
-        video_url = data.get('video', {}).get('url')
-        image_urls = data.get('images', [])  # Resimler (birden fazla olabilir)
+        video_url = data.get('data', {}).get('play')
+        image_urls = data.get('data', {}).get('images', [])  # Resimler (birden fazla olabilir)
         return video_url, image_urls
     return None, None
 
