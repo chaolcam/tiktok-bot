@@ -3,47 +3,53 @@ import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackContext
 
-# TikTok video, resim ve hikaye indirme fonksiyonu
+# TikTok video ve resim indirme fonksiyonu
 def download_tiktok_media(url):
     api_url = f"https://api.tiklydown.eu.org/api/download?url={url}"
     response = requests.get(api_url)
     if response.status_code == 200:
         data = response.json()
-        # Video, resim veya hikaye URL'sini al
         video_url = data.get('video', {}).get('url')
         image_urls = data.get('images', [])  # Resimler (birden fazla olabilir)
-        story_url = data.get('story', {}).get('url')  # Hikaye URL'si
-        return video_url, image_urls, story_url
-    return None, None, None
+        return video_url, image_urls
+    return None, None
+
+# Resimleri gruplar halinde gönderme fonksiyonu
+async def send_images_in_groups(update: Update, image_urls):
+    # Resimleri 10'lu gruplara ayır
+    for i in range(0, len(image_urls), 10):
+        group = image_urls[i:i + 10]  # 10 resimlik bir grup oluştur
+        media_group = [InputMediaPhoto(media=url) for url in group]  # Medya grubu oluştur
+        await update.message.reply_media_group(media_group)  # Grubu gönder
 
 # /start komutu
 async def start(update: Update, context: CallbackContext):
-    await update.message.reply_text('Merhaba! Bana bir TikTok linki gönderin, ben de size videoyu, resmi veya hikayeyi indireyim.')
+    await update.message.reply_text('Merhaba! Bana bir TikTok linki gönderin, ben de size videoyu veya resmi indireyim.')
 
 # Mesaj işleme
 async def handle_message(update: Update, context: CallbackContext):
-    url = update.message.text
-    if "tiktok.com" in url:
-        video_url, image_urls, story_url = download_tiktok_media(url)
-        
-        # Video varsa gönder
-        if video_url:
-            await update.message.reply_video(video_url)
-        
-        # Resimler varsa gönder (birden fazla resim olabilir)
-        if image_urls:
-            for image_url in image_urls:
-                await update.message.reply_photo(image_url)
-        
-        # Hikaye varsa gönder
-        if story_url:
-            await update.message.reply_video(story_url)
-        
-        # Hiçbir medya bulunamazsa
-        if not video_url and not image_urls and not story_url:
-            await update.message.reply_text('Üzgünüm, medya indirilemedi.')
-    else:
-        await update.message.reply_text('Lütfen geçerli bir TikTok linki gönderin.')
+    try:
+        url = update.message.text
+        if "tiktok.com" in url:
+            # Video ve resimleri indir
+            video_url, image_urls = download_tiktok_media(url)
+            
+            # Video varsa gönder
+            if video_url:
+                await update.message.reply_video(video_url)
+            
+            # Resimler varsa gruplar halinde gönder
+            if image_urls:
+                await send_images_in_groups(update, image_urls)
+            
+            # Hiçbir medya bulunamazsa
+            if not video_url and not image_urls:
+                await update.message.reply_text('Üzgünüm, medya indirilemedi.')
+        else:
+            await update.message.reply_text('Lütfen geçerli bir TikTok linki gönderin.')
+    except Exception as e:
+        print(f"Hata: {e}")
+        await update.message.reply_text('Bir hata oluştu, lütfen daha sonra tekrar deneyin.')
 
 # Botu başlatma
 def main():
