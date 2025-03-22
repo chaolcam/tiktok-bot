@@ -6,9 +6,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 
 # Ortam Değişkenleri
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')  # Kendi botunuzun token'ı
-TIKTOK_TARGET_BOT = "@best_tiktok_downloader_bot"  # TikTok hedef botu
-X_TARGET_BOT = "@twiteerrbot"  # X (Twitter) hedef botu
-TIKTOK_API_KEY = os.getenv('TIKTOK_API_KEY')  # TikTok API anahtarı
+TWITTER_API_KEY = os.getenv('TWITTER_API_KEY')  # Twitter API anahtarı (örneğin, RapidAPI'den alınan)
 
 # Loglama Ayarları
 logging.basicConfig(
@@ -19,49 +17,49 @@ logger = logging.getLogger(__name__)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Kullanıcıya başlangıç mesajı gönderir."""
-    await update.message.reply_text('🎉 Merhaba! TikTok veya X (Twitter) linklerini gönder.')
+    await update.message.reply_text('🎉 Merhaba! Twitter linklerini gönder.')
 
-async def download_tiktok(url: str) -> list:
-    """TikTok videolarını ve resimlerini API ile indirir."""
+async def download_twitter(url: str) -> list:
+    """Twitter medyalarını API ile indirir."""
     try:
         headers = {
-            "X-RapidAPI-Key": TIKTOK_API_KEY,
-            "X-RapidAPI-Host": "tiktok-video-no-watermark2.p.rapidapi.com"
+            "X-RapidAPI-Key": TWITTER_API_KEY,
+            "X-RapidAPI-Host": "twitter-downloader-download-twitter-videos-gifs-and-images.p.rapidapi.com"
         }
         params = {"url": url}
         response = requests.get(
-            "https://tiktok-video-no-watermark2.p.rapidapi.com/",
+            "https://twitter-downloader-download-twitter-videos-gifs-and-images.p.rapidapi.com/video",
             headers=headers,
             params=params
         )
         data = response.json()
         
         # API yanıtını logla
-        logger.info(f"TikTok API Yanıtı: {data}")
+        logger.info(f"Twitter API Yanıtı: {data}")
         
         # Medya URL'lerini çek
         media_urls = []
-        if "data" in data:
-            if "play" in data["data"]:  # Video URL'si
-                media_urls.append({"type": "video", "url": data["data"]["play"]})
-            if "images" in data["data"]:  # Resimler varsa
-                for image in data["data"]["images"]:
-                    media_urls.append({"type": "photo", "url": image})
+        if "media" in data:
+            for media in data["media"]:
+                if media["type"] == "video":
+                    media_urls.append({"type": "video", "url": media["url"]})
+                elif media["type"] == "image":
+                    media_urls.append({"type": "photo", "url": media["url"]})
         return media_urls
     except Exception as e:
-        logger.error(f"TikTok API Hatası: {str(e)}")
+        logger.error(f"Twitter API Hatası: {str(e)}")
         return []
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Kullanıcıdan gelen mesajı işler ve TikTok veya X medyasını gönderir."""
+    """Kullanıcıdan gelen mesajı işler ve Twitter medyasını gönderir."""
     url = update.message.text
     
     try:
-        if 'tiktok.com' in url:  # TikTok linki
-            # Önce TikTok API'si ile video veya resim indirmeyi dene
-            media_urls = await download_tiktok(url)
+        if 'twitter.com' in url or 'x.com' in url:  # Twitter linki
+            # Twitter API'si ile medya indirmeyi dene
+            media_urls = await download_twitter(url)
             
-            if media_urls:  # Video veya resim bulundu
+            if media_urls:  # Medya bulundu
                 # Medya öğelerini tek tek gönder
                 for media in media_urls:
                     try:
@@ -69,24 +67,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             await update.message.reply_video(video=media["url"])
                         elif media["type"] == "photo":
                             await update.message.reply_photo(photo=media["url"])
-                        logger.info(f"✅ TikTok medya gönderildi: {media['url']}")
+                        logger.info(f"✅ Twitter medya gönderildi: {media['url']}")
                     except Exception as e:
                         logger.error(f"⛔ Medya gönderim hatası: {str(e)}")
                         await update.message.reply_text(f"⚠️ Medya gönderilirken hata oluştu: {str(e)}")
-            else:  # Video veya resim bulunamadı, TikTok hedef bota yönlendir
-                await update.message.reply_text(
-                    f"⏳ TikTok hikayesi veya desteklenmeyen link. "
-                    f"Lütfen bu linki şu bota gönderin: {TIKTOK_TARGET_BOT}"
-                )
-
-        elif 'x.com' in url or 'twitter.com' in url:  # X (Twitter) linki
-            await update.message.reply_text(
-                f"⏳ X (Twitter) linki. "
-                f"Lütfen bu linki şu bota gönderin: {X_TARGET_BOT}"
-            )
-
+            else:  # Medya bulunamadı
+                await update.message.reply_text("❌ Twitter medyası bulunamadı.")
         else:
-            await update.message.reply_text("❌ Geçersiz link. Sadece TikTok veya X (Twitter) linkleri desteklenmektedir.")
+            await update.message.reply_text("❌ Geçersiz link. Sadece Twitter linkleri desteklenmektedir.")
     except Exception as e:
         logger.error(f"⛔ Kritik hata: {str(e)}")
         await update.message.reply_text(f"⚠️ Üzgünüm, şu hata oluştu:\n{str(e)}")
