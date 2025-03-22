@@ -1,10 +1,9 @@
 import os
 import requests
-from bs4 import BeautifulSoup
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackContext
 
-# TikTok video, resim ve hikaye indirme fonksiyonu
+# TikTok video ve resim indirme fonksiyonu
 def download_tiktok_media(url):
     # Video ve resimler için API
     api_url = f"https://api.tiklydown.eu.org/api/download?url={url}"
@@ -13,42 +12,19 @@ def download_tiktok_media(url):
         data = response.json()
         video_url = data.get('video', {}).get('url')
         image_urls = data.get('images', [])  # Resimler (birden fazla olabilir)
-        return video_url, image_urls, None  # Hikaye URL'si henüz yok
-    return None, None, None
-
-# TikTok hikayesi indirme fonksiyonu (web scraping)
-def download_tiktok_story(url):
-    try:
-        # TikTok sayfasını çek
-        response = requests.get(url)
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Hikaye URL'sini bul
-            story_url = None
-            for meta_tag in soup.find_all('meta'):
-                if 'property' in meta_tag.attrs and meta_tag.attrs['property'] == 'og:video':
-                    story_url = meta_tag.attrs['content']
-                    break
-            
-            return story_url
-    except Exception as e:
-        print(f"Hata: {e}")
-    return None
+        return video_url, image_urls
+    return None, None
 
 # /start komutu
 async def start(update: Update, context: CallbackContext):
-    await update.message.reply_text('Merhaba! Bana bir TikTok linki gönderin, ben de size videoyu, resmi veya hikayeyi indireyim.')
+    await update.message.reply_text('Merhaba! Bana bir TikTok linki gönderin, ben de size videoyu veya resmi indireyim.')
 
 # Mesaj işleme
 async def handle_message(update: Update, context: CallbackContext):
     url = update.message.text
     if "tiktok.com" in url:
         # Video ve resimleri indir
-        video_url, image_urls, _ = download_tiktok_media(url)
-        
-        # Hikayeyi indir
-        story_url = download_tiktok_story(url)
+        video_url, image_urls = download_tiktok_media(url)
         
         # Video varsa gönder
         if video_url:
@@ -59,12 +35,8 @@ async def handle_message(update: Update, context: CallbackContext):
             for image_url in image_urls:
                 await update.message.reply_photo(image_url)
         
-        # Hikaye varsa gönder
-        if story_url:
-            await update.message.reply_video(story_url)
-        
         # Hiçbir medya bulunamazsa
-        if not video_url and not image_urls and not story_url:
+        if not video_url and not image_urls:
             await update.message.reply_text('Üzgünüm, medya indirilemedi.')
     else:
         await update.message.reply_text('Lütfen geçerli bir TikTok linki gönderin.')
