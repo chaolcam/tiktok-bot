@@ -50,23 +50,27 @@ async def download_tiktok(url: str) -> list:
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text
-    media_group = []
     
     try:
         if 'tiktok.com' in url:
             # TikTok işlemleri
             media_urls = await download_tiktok(url)
-            for media_url in media_urls:
-                if media_url.endswith('.mp4'):
-                    media_group.append(InputMediaVideo(requests.get(media_url).content))
-                else:
-                    media_group.append(InputMediaPhoto(requests.get(media_url).content))
-            logger.info("✅ TikTok medya indirildi")
+            if not media_urls:
+                await update.message.reply_text("❌ Desteklenmeyen link formatı")
+                return
 
-        if media_group:
-            await update.message.reply_media_group(media=media_group)
-        else:
-            await update.message.reply_text("❌ Desteklenmeyen link formatı")
+            # Medya gruplarını 10'lu parçalara böl
+            for i in range(0, len(media_urls), 10):
+                media_group = []
+                for media_url in media_urls[i:i+10]:
+                    if media_url.endswith('.mp4'):
+                        media_group.append(InputMediaVideo(requests.get(media_url).content))
+                    else:
+                        media_group.append(InputMediaPhoto(requests.get(media_url).content))
+                
+                # Medya grubunu gönder
+                await update.message.reply_media_group(media=media_group)
+                logger.info(f"✅ TikTok medya grubu gönderildi: {len(media_group)} öğe")
 
     except Exception as e:
         logger.error(f"⛔ Kritik hata: {str(e)}")
