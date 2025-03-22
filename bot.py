@@ -1,13 +1,13 @@
 import os
 import logging
 import requests
-from telegram import Update, Bot
+from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # Ortam Değişkenleri
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')  # Kendi botunuzun token'ı
 TIKTOK_TARGET_BOT = "@best_tiktok_downloader_bot"  # TikTok hedef botu
-X_TARGET_BOT = "@twiteerrbot"  # X (Twitter) hedef botu (yeni kullanıcı adı)
+X_TARGET_BOT = "@uvd_bot"  # X (Twitter) hedef botu
 TIKTOK_API_KEY = os.getenv('TIKTOK_API_KEY')  # TikTok API anahtarı
 
 # Loglama Ayarları
@@ -74,24 +74,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         logger.error(f"⛔ Medya gönderim hatası: {str(e)}")
                         await update.message.reply_text(f"⚠️ Medya gönderilirken hata oluştu: {str(e)}")
             else:  # Video veya resim bulunamadı, TikTok hedef bota yönlendir
-                await update.message.reply_text("⏳ TikTok hikayesi veya desteklenmeyen link, TikTok hedef bota yönlendiriliyor...")
-                
-                # TikTok hedef bota linki gönder
-                target_bot = Bot(token=TOKEN)
-                await target_bot.send_message(chat_id=TIKTOK_TARGET_BOT, text=url)
-                
-                # Hedef botun yanıtını bekleyin (örneğin, 10 saniye)
-                await update.message.reply_text("✅ TikTok hedef bot medyayı işliyor...")
+                await update.message.reply_text(
+                    f"⏳ TikTok hikayesi veya desteklenmeyen link. "
+                    f"Lütfen bu linki şu bota gönderin: {TIKTOK_TARGET_BOT}"
+                )
 
         elif 'x.com' in url or 'twitter.com' in url:  # X (Twitter) linki
-            await update.message.reply_text("⏳ X (Twitter) linki, X hedef bota yönlendiriliyor...")
-            
-            # X hedef bota linki gönder
-            target_bot = Bot(token=TOKEN)
-            await target_bot.send_message(chat_id=X_TARGET_BOT, text=url)
-            
-            # Hedef botun yanıtını bekleyin (örneğin, 10 saniye)
-            await update.message.reply_text("✅ X hedef bot medyayı işliyor...")
+            await update.message.reply_text(
+                f"⏳ X (Twitter) linki. "
+                f"Lütfen bu linki şu bota gönderin: {X_TARGET_BOT}"
+            )
 
         else:
             await update.message.reply_text("❌ Geçersiz link. Sadece TikTok veya X (Twitter) linkleri desteklenmektedir.")
