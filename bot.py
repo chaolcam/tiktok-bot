@@ -40,6 +40,10 @@ async def download_tiktok(url: str) -> str:
 async def download_twitter(url: str) -> list:
     """Twitter/X videosunu API ile indirir"""
     try:
+        # Linki Twitsave API'sine uygun hale getir
+        if 'x.com' in url:
+            url = url.replace('x.com', 'twitter.com')  # x.com -> twitter.com
+        
         # Twitsave API kullanımı
         response = requests.post("https://twitsave.com/info", data={"url": url})
         data = response.json()
