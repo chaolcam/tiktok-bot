@@ -7,7 +7,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 # Ortam Değişkenleri
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')  # Kendi botunuzun token'ı
 TIKTOK_TARGET_BOT = "@best_tiktok_downloader_bot"  # TikTok hedef botu
-X_TARGET_BOT = "@uvd_bot"  # X (Twitter) hedef botu (yeni kullanıcı adı)
+X_TARGET_BOT = "@twiteerrbot"  # X (Twitter) hedef botu (yeni kullanıcı adı)
 TIKTOK_API_KEY = os.getenv('TIKTOK_API_KEY')  # TikTok API anahtarı
 
 # Loglama Ayarları
