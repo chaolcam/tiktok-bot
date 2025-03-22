@@ -5,16 +5,26 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 
 # TikTok video, resim ve hikaye indirme fonksiyonu
 def download_tiktok_media(url):
+    # Video ve resimler için API
     api_url = f"https://api.tiklydown.eu.org/api/download?url={url}"
     response = requests.get(api_url)
     if response.status_code == 200:
         data = response.json()
-        # Video, resim veya hikaye URL'sini al
         video_url = data.get('video', {}).get('url')
         image_urls = data.get('images', [])  # Resimler (birden fazla olabilir)
-        story_url = data.get('story', {}).get('url')  # Hikaye URL'si
-        return video_url, image_urls, story_url
+        return video_url, image_urls, None  # Hikaye URL'si henüz yok
     return None, None, None
+
+# TikTok hikayesi indirme fonksiyonu
+def download_tiktok_story(url):
+    # Hikaye için alternatif API
+    api_url = f"https://snaptik.app/api/v1/get?url={url}"
+    response = requests.get(api_url)
+    if response.status_code == 200:
+        data = response.json()
+        story_url = data.get('data', {}).get('story_url')
+        return story_url
+    return None
 
 # /start komutu
 async def start(update: Update, context: CallbackContext):
@@ -24,7 +34,11 @@ async def start(update: Update, context: CallbackContext):
 async def handle_message(update: Update, context: CallbackContext):
     url = update.message.text
     if "tiktok.com" in url:
-        video_url, image_urls, story_url = download_tiktok_media(url)
+        # Video ve resimleri indir
+        video_url, image_urls, _ = download_tiktok_media(url)
+        
+        # Hikayeyi indir
+        story_url = download_tiktok_story(url)
         
         # Video varsa gönder
         if video_url:
