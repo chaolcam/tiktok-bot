@@ -1,7 +1,7 @@
 import os
 import logging
 import requests
-from telegram import Update, InputMediaVideo
+from telegram import Update, InputMediaVideo, InputMediaPhoto
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # Ortam Değişkenleri
@@ -16,7 +16,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text('🎉 Merhaba! TikTok/Twitter linklerini gönder.')
+    await update.message.reply_text('🎉 Merhaba! TikTok ve X (Twitter) linklerini gönder.')
 
 async def download_tiktok(url: str) -> str:
     """TikTok videosunu API ile indirir"""
@@ -37,15 +37,25 @@ async def download_tiktok(url: str) -> str:
         logger.error(f"TikTok API Hatası: {str(e)}")
         raise
 
-async def download_twitter(url: str) -> str:
-    """Twitter videosunu API ile indirir"""
+async def download_twitter(url: str) -> list:
+    """Twitter/X videosunu API ile indirir"""
     try:
-        response = requests.get(f"https://twitsave.com/info?url={url}")
+        # Twitsave API kullanımı
+        response = requests.post("https://twitsave.com/info", data={"url": url})
         data = response.json()
-        return data["video"][0]["url"]  # İndirilebilir video URL'si
+        
+        # Medya URL'lerini çek
+        media_urls = []
+        if "media" in data:
+            for media in data["media"]:
+                if media["type"] == "video":
+                    media_urls.append(media["url"])
+                elif media["type"] == "photo":
+                    media_urls.append(media["url"])
+        return media_urls
     except Exception as e:
-        logger.error(f"Twitter API Hatası: {str(e)}")
-        raise
+        logger.error(f"Twitter/X API Hatası: {str(e)}")
+        return []
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text
@@ -53,16 +63,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         if 'tiktok.com' in url:
+            # TikTok işlemleri
             video_url = await download_tiktok(url)
             media_content = requests.get(video_url).content
             media_group.append(InputMediaVideo(media_content))
             logger.info("✅ TikTok video indirildi")
 
-        elif 'twitter.com' in url:
-            video_url = await download_twitter(url)
-            media_content = requests.get(video_url).content
-            media_group.append(InputMediaVideo(media_content))
-            logger.info("✅ Twitter video indirildi")
+        elif 'twitter.com' in url or 'x.com' in url:
+            # Twitter/X işlemleri
+            media_urls = await download_twitter(url)
+            for media_url in media_urls:
+                if media_url.endswith('.mp4'):
+                    media_group.append(InputMediaVideo(requests.get(media_url).content))
+                else:
+                    media_group.append(InputMediaPhoto(requests.get(media_url).content))
+            logger.info("✅ Twitter/X medya indirildi")
 
         if media_group:
             await update.message.reply_media_group(media=media_group)
