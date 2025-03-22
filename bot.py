@@ -1,7 +1,7 @@
 import os
 import logging
 import requests
-from telegram import Update, InputMediaVideo, InputMediaPhoto
+from telegram import Update, InputMediaVideo
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # Ortam Değişkenleri
