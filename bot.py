@@ -77,7 +77,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     logger.info(f"✅ TikTok medya gönderildi: {media_url}")
                 except Exception as e:
                     logger.error(f"⛔ Medya gönderim hatası: {str(e)}")
-                    await update.message.reply_text(f"⚠️ Medya gönderilirken hata oluştu: {str(e)}")
+                    # Hata mesajını kullanıcıya gönderme, sadece logla
+                    continue  # Bir sonraki medyaya geç
 
             # Kaç tane medya gönderildiğini logla
             logger.info(f"Toplam {len(valid_media_urls)} medya gönderildi.")
