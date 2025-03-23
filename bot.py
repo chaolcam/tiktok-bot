@@ -1,7 +1,6 @@
 import os
 import logging
 import requests
-import re
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -16,9 +15,6 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
-
-# TikTok linklerini kontrol etmek için regex deseni
-TIKTOK_LINK_PATTERN = re.compile(r'https?://(www\.)?tiktok\.com/.+')
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Kullanıcıya başlangıç mesajı gönderir."""
@@ -55,13 +51,13 @@ async def download_tiktok(url: str) -> list:
         logger.error(f"TikTok API Hatası: {str(e)}")
         return []
 
-async def handle_tiktok_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """TikTok linklerini işler ve medyayı gönderir."""
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Kullanıcıdan gelen mesajı işler ve TikTok medyasını gönderir."""
     url = update.message.text
     
     try:
-        # TikTok linki kontrolü
-        if TIKTOK_LINK_PATTERN.match(url):
+        # Sadece "https://vt.tiktok.com/" ile başlayan linkleri işle
+        if url.startswith("https://vt.tiktok.com/"):
             # Önce TikTok API'si ile video veya resim indirmeyi dene
             media_urls = await download_tiktok(url)
             
@@ -87,7 +83,8 @@ async def handle_tiktok_link(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 # Hedef botun yanıtını bekleyin (örneğin, 10 saniye)
                 await update.message.reply_text("✅ Hedef bot medyayı işliyor...")
         else:
-            await update.message.reply_text("❌ Geçersiz TikTok linki.")
+            # TikTok linki değilse, hiçbir şey yapma (görmezden gel)
+            pass
     except Exception as e:
         logger.error(f"⛔ Kritik hata: {str(e)}")
         await update.message.reply_text(f"⚠️ Üzgünüm, şu hata oluştu:\n{str(e)}")
@@ -99,8 +96,7 @@ if __name__ == '__main__':
     # /start komutu için handler
     app.add_handler(CommandHandler("start", start))
     
-    # Sadece TikTok linklerini işleyen handler
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(TIKTOK_LINK_PATTERN), handle_tiktok_link))
+    # Tüm mesajları işleyen handler (filtreleme if koşulu içinde yapılıyor)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    # Diğer mesajları görmezden gel
     app.run_polling()
