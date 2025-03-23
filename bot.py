@@ -1,6 +1,7 @@
 import os
 import logging
 import requests
+import re
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -16,9 +17,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# TikTok linklerini kontrol etmek için regex deseni
+TIKTOK_LINK_PATTERN = re.compile(r'https?://(www\.)?tiktok\.com/.+')
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Kullanıcıya başlangıç mesajı gönderir."""
-    await update.message.reply_text('🎉 Merhaba! TikTok linklerini veya hikayelerini gönder.')
+    await update.message.reply_text('🎉 Merhaba! TikTok linklerini gönder.')
 
 async def download_tiktok(url: str) -> list:
     """TikTok videolarını ve resimlerini API ile indirir."""
@@ -51,12 +55,13 @@ async def download_tiktok(url: str) -> list:
         logger.error(f"TikTok API Hatası: {str(e)}")
         return []
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Kullanıcıdan gelen mesajı işler ve TikTok medyasını gönderir."""
+async def handle_tiktok_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """TikTok linklerini işler ve medyayı gönderir."""
     url = update.message.text
     
     try:
-        if 'tiktok.com' in url:
+        # TikTok linki kontrolü
+        if TIKTOK_LINK_PATTERN.match(url):
             # Önce TikTok API'si ile video veya resim indirmeyi dene
             media_urls = await download_tiktok(url)
             
@@ -90,6 +95,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 if __name__ == '__main__':
     # Botu başlat
     app = Application.builder().token(TOKEN).build()
+    
+    # /start komutu için handler
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    # Sadece TikTok linklerini işleyen handler
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(TIKTOK_LINK_PATTERN), handle_tiktok_link))
+    
+    # Diğer mesajları görmezden gel
     app.run_polling()
