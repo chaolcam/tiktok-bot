@@ -4,8 +4,8 @@ import requests
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import yt_dlp as youtube_dl
-import praw
 from bs4 import BeautifulSoup
+import asyncpraw as praw
 
 # Ortam Değişkenleri
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -20,7 +20,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Reddit API bağlantısı
+# Reddit API bağlantısı (AsyncPRAW)
 reddit = praw.Reddit(
     client_id=REDDIT_CLIENT_ID,
     client_secret=REDDIT_CLIENT_SECRET,
@@ -33,7 +33,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🎉 Merhaba! Sosyal medya linklerini gönderin:
 - TikTok (video/resim)
 - Reddit (video/resim)
-- Twitter (video/resim) - API kullanılmadan
+- Twitter (video/resim)
 - YouTube (video/shorts)
 """
     await update.message.reply_text(help_text)
@@ -83,16 +83,17 @@ async def download_tiktok(url: str) -> list:
 async def download_reddit(url: str) -> list:
     """Reddit gönderilerini indirir."""
     try:
-        # URL'yi düzelt (www.reddit.com/r/subreddit/s/... -> www.reddit.com/r/subreddit/comments/...)
+        # URL'yi düzelt
         if '/s/' in url:
             url = url.replace('/s/', '/comments/')
         
-        # URL'nin geçerli bir submission olup olmadığını kontrol et
         if not any(p in url for p in ['/comments/', '/r/']):
             logger.error(f"Geçersiz Reddit URL: {url}")
             return []
             
-        submission = reddit.submission(url=url)
+        submission = await reddit.submission(url=url)
+        await submission.load()
+        
         media_urls = []
         
         # Video kontrolü
@@ -124,16 +125,13 @@ async def download_reddit(url: str) -> list:
         return []
 
 async def download_twitter(url: str) -> list:
-    """Twitter gönderilerini tamamen API'siz indirir."""
+    """Twitter gönderilerini indirir."""
     try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        
-        # 1. Alternatif: Twitsave API
+        # 1. Yöntem: TwitFix API
         try:
-            api_url = f"https://twitsave.com/info?url={url}"
-            response = requests.get(api_url, headers=headers, timeout=10)
+            tweet_id = url.split('/')[-1].split('?')[0]
+            api_url = f"https://twitfix.onrender.com/{tweet_id}"
+            response = requests.get(api_url, timeout=10)
             if response.status_code == 200:
                 data = response.json()
                 if data.get('media'):
@@ -141,7 +139,21 @@ async def download_twitter(url: str) -> list:
         except:
             pass
         
-        # 2. Alternatif: Mobil sayfa
+        # 2. Yöntem: Twitsave API
+        try:
+            api_url = f"https://twitsave.com/info?url={url}"
+            response = requests.get(api_url, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('media'):
+                    return [{"type": "video", "url": data['media'][0]['url']}]
+        except:
+            pass
+        
+        # 3. Yöntem: Mobil sayfa
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; Pixel 3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.108 Mobile Safari/537.36'
+        }
         mobile_url = url.replace("twitter.com", "mobile.twitter.com").replace("x.com", "mobile.twitter.com")
         response = requests.get(mobile_url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -178,16 +190,18 @@ async def download_youtube(url: str) -> list:
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
+            'cookiefile': 'cookies.txt',
+            'ignoreerrors': True,
+            'geo_bypass': True,
+            'geo_bypass_country': 'US',
         }
         
         with youtube_dl.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             
-            # Çalma listesi kontrolü
             if 'entries' in info:
                 info = info['entries'][0]
                 
-            # URL'yi kontrol et
             if not info.get('url'):
                 logger.error("YouTube: Video URL'si alınamadı")
                 return []
