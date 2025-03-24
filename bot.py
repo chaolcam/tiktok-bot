@@ -1,6 +1,5 @@
 import os
 import logging
-import re
 import requests
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -13,7 +12,6 @@ TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TIKTOK_API_KEY = os.getenv('TIKTOK_API_KEY')
 REDDIT_CLIENT_ID = os.getenv('REDDIT_CLIENT_ID')
 REDDIT_CLIENT_SECRET = os.getenv('REDDIT_CLIENT_SECRET')
-TWITTER_BEARER_TOKEN = os.getenv('TWITTER_BEARER_TOKEN')
 
 # Loglama Ayarları
 logging.basicConfig(
@@ -35,22 +33,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🎉 Merhaba! Sosyal medya linklerini gönderin:
 - TikTok (video/resim)
 - Reddit (video/resim)
-- Twitter (video/resim)
+- Twitter (video/resim) - API kullanılmadan
 - YouTube (video/shorts)
 """
     await update.message.reply_text(help_text)
 
 def is_tiktok(url):
-    return "tiktok.com" in url or "vm.tiktok.com" in url or "vt.tiktok.com" in url
+    return "tiktok.com" in url.lower()
 
 def is_reddit(url):
-    return "reddit.com" in url
+    return "reddit.com" in url.lower()
 
 def is_twitter(url):
-    return "twitter.com" in url or "x.com" in url
+    return "twitter.com" in url.lower() or "x.com" in url.lower()
 
 def is_youtube(url):
-    return "youtube.com" in url or "youtu.be" in url
+    return "youtube.com" in url.lower() or "youtu.be" in url.lower()
 
 async def download_tiktok(url: str) -> list:
     """TikTok videolarını ve resimlerini API ile indirir."""
@@ -106,18 +104,32 @@ async def download_reddit(url: str) -> list:
         return []
 
 async def download_twitter(url: str) -> list:
-    """Twitter gönderilerini indirir (API kullanmadan)."""
+    """Twitter gönderilerini tamamen API'siz indirir."""
     try:
-        # Twitter mobil sayfasını kullanarak içerik çekme
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; Pixel 3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.108 Mobile Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
         
-        # URL'yi mobil versiyona çevir
-        mobile_url = url.replace("twitter.com", "mobile.twitter.com")
-        mobile_url = mobile_url.replace("x.com", "mobile.twitter.com")
+        # URL'yi standardize et
+        parsed_url = url.replace("x.com", "twitter.com").replace("//twitter", "//mobile.twitter")
         
-        response = requests.get(mobile_url, headers=headers)
+        # Önce twdown.net alternatifini dene
+        try:
+            api_url = f"https://twdown.net/download.php?url={parsed_url}"
+            response = requests.get(api_url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                download_btn = soup.find('a', {'id': 'download'})
+                if download_btn and download_btn.get('href'):
+                    return [{"type": "video", "url": download_btn['href']}]
+        except:
+            pass
+        
+        # Mobil sayfayı parse et
+        if not parsed_url.startswith(('http://', 'https://')):
+            parsed_url = 'https://' + parsed_url
+            
+        response = requests.get(parsed_url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, 'html.parser')
         
         media_urls = []
@@ -127,14 +139,18 @@ async def download_twitter(url: str) -> list:
         if video_tag:
             video_url = video_tag.get('src')
             if video_url:
-                media_urls.append({"type": "video", "url": f"https:{video_url}"})
+                if not video_url.startswith('http'):
+                    video_url = f"https:{video_url}"
+                media_urls.append({"type": "video", "url": video_url})
         
         # Resim kontrolü
-        images = soup.find_all('img', {'data-aria-label-part': ''})
+        images = soup.find_all('img', {'alt': 'Image'})
         for img in images:
             img_url = img.get('src')
             if img_url and 'profile_images' not in img_url:
-                media_urls.append({"type": "photo", "url": f"https:{img_url}"})
+                if not img_url.startswith('http'):
+                    img_url = f"https:{img_url}"
+                media_urls.append({"type": "photo", "url": img_url})
                 
         return media_urls
     except Exception as e:
@@ -152,7 +168,7 @@ async def download_youtube(url: str) -> list:
         
         with youtube_dl.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            if 'entries' in info:  # Çalma listesi
+            if 'entries' in info:
                 info = info['entries'][0]
                 
             media_urls = [{
@@ -168,7 +184,7 @@ async def download_youtube(url: str) -> list:
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Kullanıcıdan gelen mesajı işler ve medya gönderir."""
-    url = update.message.text
+    url = update.message.text.strip()
     
     try:
         if is_tiktok(url):
