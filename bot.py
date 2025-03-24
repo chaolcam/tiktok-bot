@@ -34,7 +34,7 @@ async def cleanup():
     await reddit.close()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🎉 Merhaba! Sosyal medya linklerini gönderin:\n- TikTok\n- Reddit\n- Twitter\n- YouTube")
+    await update.message.reply_text("🎉 Merhaba! Sosyal medya linklerini gönderin:\n- TikTok\n- Reddit\n- Twitter/X\n- YouTube")
 
 async def download_tiktok(url: str) -> list:
     try:
@@ -57,32 +57,36 @@ async def download_tiktok(url: str) -> list:
 
 async def download_reddit(url: str) -> list:
     try:
-        # URL düzeltme
-        url = re.sub(r'/s/(\w+)$', r'/comments/\1', url)
-        if not re.search(r'/comments/|/r/', url):
+        # URL formatını düzelt
+        url = url.replace("www.reddit.com", "old.reddit.com")
+        if '/s/' in url:
+            url = url.replace('/s/', '/comments/')
+        
+        # Geçerli bir Reddit linki mi kontrol et
+        if not re.match(r'^https?://(old\.)?reddit\.com/r/\w+/comments/\w+', url):
+            logger.error(f"Geçersiz Reddit URL: {url}")
             return []
             
         submission = await reddit.submission(url=url.split('?')[0])
         await submission.load()
         
+        # Video içeriği
         if getattr(submission, 'is_video', False):
             video_url = submission.media['reddit_video']['fallback_url']
             return [{"type": "video", "url": video_url.split('?')[0]}]
             
-        elif hasattr(submission, 'gallery_data'):
-            media_urls = []
-            for item in submission.gallery_data['items']:
-                media_url = submission.media_metadata[item['media_id']]['s']['u']
-                media_url = media_url.replace('preview.redd.it', 'i.redd.it')
-                media_urls.append({"type": "photo", "url": media_url})
-            return media_urls
-            
-        elif submission.url.endswith(('jpg', 'jpeg', 'png', 'gif')):
+        # Galeri içeriği
+        if hasattr(submission, 'is_gallery') and submission.is_gallery:
+            return [{"type": "photo", "url": submission.media_metadata[item]['s']['u']} 
+                   for item in submission.gallery_data['items']]
+        
+        # Tek resim
+        if submission.url.endswith(('jpg', 'jpeg', 'png', 'gif')):
             return [{"type": "photo", "url": submission.url}]
             
         return []
     except Exception as e:
-        logger.error(f"Reddit Error: {str(e)}")
+        logger.error(f"Reddit Error (URL: {url}): {str(e)}")
         return []
 
 async def download_twitter(url: str) -> list:
@@ -92,31 +96,38 @@ async def download_twitter(url: str) -> list:
             "X-RapidAPI-Key": TWITTER_API_KEY,
             "X-RapidAPI-Host": "twitter241.p.rapidapi.com"
         }
-        params = {"url": url}
         response = requests.get(
-            "https://twitter241.p.rapidapi.com/api/v1/get_tweet",
+            f"https://twitter241.p.rapidapi.com/api/v1/get_tweet?url={url}",
             headers=headers,
-            params=params,
             timeout=15
         )
+        logger.debug(f"Twitter API Response: {response.text}")
+        
         if response.status_code == 200:
             data = response.json()
             if data.get('media'):
-                return [{"type": "video", "url": data['media'][0]['url']}]
+                media_url = data['media'][0]['url']
+                if media_url.startswith('http'):
+                    return [{"type": "video", "url": media_url}]
         
         # 2. Yöntem: TwitFix
-        tweet_id = re.search(r'/status/(\d+)', url).group(1)
-        response = requests.get(f"https://twitfix.onrender.com/{tweet_id}", timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            if data.get('url'):
-                return [{"type": "video", "url": data['url']}]
+        tweet_id = re.search(r'/status/(\d+)', url)
+        if tweet_id:
+            response = requests.get(
+                f"https://twitfix.onrender.com/{tweet_id.group(1)}",
+                timeout=10
+            )
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('url'):
+                    return [{"type": "video", "url": data['url']}]
         
         # 3. Yöntem: Mobil sayfa
         headers = {'User-Agent': 'Mozilla/5.0'}
         mobile_url = url.replace("twitter.com", "mobile.twitter.com").replace("x.com", "mobile.twitter.com")
         response = requests.get(mobile_url, headers=headers, timeout=15)
         soup = BeautifulSoup(response.text, 'html.parser')
+        
         if video := soup.find('video'):
             video_url = video.get('src')
             if video_url:
@@ -126,19 +137,36 @@ async def download_twitter(url: str) -> list:
         
         return []
     except Exception as e:
-        logger.error(f"Twitter Error: {str(e)}")
+        logger.error(f"Twitter Error (URL: {url}): {str(e)}")
         return []
 
 async def download_youtube(url: str) -> list:
     try:
+        # Video ID çıkarma
+        video_id = None
+        patterns = [
+            r'(?:v=|youtu\.be/|embed/|shorts/)([\w-]{11})',
+            r'^([\w-]{11})$'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, url)
+            if match:
+                video_id = match.group(1)
+                break
+                
+        if not video_id:
+            logger.error(f"Geçersiz YouTube URL: {url}")
+            return []
+        
         # YouTube API
-        video_id = re.search(r'(?:v=|youtu\.be/)([\w-]+)', url).group(1)
-        response = requests.get(
-            f"https://www.googleapis.com/youtube/v3/videos?id={video_id}&key={YOUTUBE_API_KEY}&part=contentDetails",
-            timeout=15
-        )
-        if response.status_code == 200:
-            return [{"type": "video", "url": f"https://youtu.be/{video_id}"}]
+        if YOUTUBE_API_KEY:
+            response = requests.get(
+                f"https://www.googleapis.com/youtube/v3/videos?id={video_id}&key={YOUTUBE_API_KEY}&part=contentDetails",
+                timeout=15
+            )
+            if response.status_code == 200:
+                return [{"type": "video", "url": f"https://youtu.be/{video_id}"}]
         
         # yt-dlp fallback
         ydl_opts = {
@@ -147,21 +175,21 @@ async def download_youtube(url: str) -> list:
             'no_warnings': True,
             'ignoreerrors': True,
             'geo_bypass': True,
-            'socket_timeout': 15,
             'extract_flat': False
         }
         with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+            info = ydl.extract_info(f"https://youtu.be/{video_id}", download=False)
             if info and 'url' in info:
                 return [{"type": "video", "url": info['url']}]
         
         return []
     except Exception as e:
-        logger.error(f"YouTube Error: {str(e)}")
+        logger.error(f"YouTube Error (URL: {url}): {str(e)}")
         return []
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
+    logger.info(f"Processing URL: {url}")
     
     try:
         if 'tiktok.com' in url.lower():
@@ -181,6 +209,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         if not media:
+            logger.warning(f"Medya bulunamadı: {url}")
             await update.message.reply_text(f"⚠️ {platform} içeriği indirilemedi")
             return
             
@@ -203,15 +232,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         write_timeout=30
                     )
             except Exception as e:
-                logger.error(f"Send Error: {str(e)}")
-                await update.message.reply_text(f"⚠️ Gönderim hatası: {str(e)}")
+                logger.error(f"Gönderim Hatası: {str(e)} - URL: {item.get('url')}")
+                await update.message.reply_text(f"⚠️ Medya gönderilemedi: {str(e)}")
     except Exception as e:
-        logger.error(f"General Error: {str(e)}")
+        logger.error(f"Genel Hata: {str(e)}")
         await update.message.reply_text("⚠️ Bir hata oluştu, lütfen daha sonra tekrar deneyin")
+
+async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Sistem durumunu test et"""
+    services = {
+        "Reddit": bool(REDDIT_CLIENT_ID),
+        "Twitter": bool(TWITTER_API_KEY),
+        "YouTube": bool(YOUTUBE_API_KEY),
+        "TikTok": bool(TIKTOK_API_KEY)
+    }
+    await update.message.reply_text(f"🛠️ Sistem Durumu:\n{services}")
 
 if __name__ == '__main__':
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("test", test))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     try:
