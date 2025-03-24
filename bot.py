@@ -3,10 +3,11 @@ import logging
 import requests
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from bs4 import BeautifulSoup
 
 # Ortam Değişkenleri
-TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')  # Kendi botunuzun token'ı
+TARGET_BOT_USERNAME = "@best_tiktok_downloader_bot"  # Hedef botun kullanıcı adı
+TIKTOK_API_KEY = os.getenv('TIKTOK_API_KEY')  # TikTok API anahtarı
 
 # Loglama Ayarları
 logging.basicConfig(
@@ -15,141 +16,87 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Güncel İndirme Servisleri (Sadece Twitter ve Reddit güncellendi)
-SERVICES = {
-    'twitter': 'https://twitsave.com',
-    'reddit': 'https://redditsave.com'
-}
-
-# Kullanıcı agent bilgisi
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-}
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🎉 Merhaba! Şu platformlardan link gönderin:\n"
-        "- TikTok\n"
-        "- Reddit\n"
-        "- Twitter/X\n\n"
-        "⏳ İndirme işlemi biraz zaman alabilir..."
-    )
+    """Kullanıcıya başlangıç mesajı gönderir."""
+    await update.message.reply_text('🎉 Merhaba! TikTok linklerini gönder.')
 
-async def download_tiktok(url: str) -> str:
-    """TikTok video indirme fonksiyonu (Orjinal kod aynı kaldı)"""
+async def download_tiktok(url: str) -> list:
+    """TikTok videolarını ve resimlerini API ile indirir."""
     try:
         headers = {
-            "X-RapidAPI-Key": os.getenv('TIKTOK_API_KEY'),
+            "X-RapidAPI-Key": TIKTOK_API_KEY,
             "X-RapidAPI-Host": "tiktok-video-no-watermark2.p.rapidapi.com"
         }
+        params = {"url": url}
         response = requests.get(
-            f"https://tiktok-video-no-watermark2.p.rapidapi.com/?url={url}",
+            "https://tiktok-video-no-watermark2.p.rapidapi.com/",
             headers=headers,
-            timeout=15
+            params=params
         )
         data = response.json()
-        return data.get('data', {}).get('play', '')
-    except Exception as e:
-        logger.error(f"TikTok Error: {str(e)}")
-        return ''
-
-async def download_twitter(url: str) -> str:
-    """Twitter/X video indirme fonksiyonu (Yeni versiyon)"""
-    try:
-        # URL'yi standardize et
-        clean_url = url.replace("x.com", "twitter.com").split('?')[0]
         
-        # Twitsave API'si
-        response = requests.post(
-            f"{SERVICES['twitter']}/info",
-            data={'url': clean_url},
-            headers=HEADERS,
-            timeout=30
-        )
+        # API yanıtını logla
+        logger.info(f"TikTok API Yanıtı: {data}")
         
-        if response.status_code == 200:
-            data = response.json()
-            return data.get('url', data.get('video_url', ''))
-        return ''
+        # Medya URL'lerini çek
+        media_urls = []
+        if "data" in data:
+            if "play" in data["data"]:  # Video URL'si
+                media_urls.append({"type": "video", "url": data["data"]["play"]})
+            if "images" in data["data"]:  # Resimler varsa
+                for image in data["data"]["images"]:
+                    media_urls.append({"type": "photo", "url": image})
+        return media_urls
     except Exception as e:
-        logger.error(f"Twitter Error: {str(e)}", exc_info=True)
-        return ''
-
-async def download_reddit(url: str) -> str:
-    """Reddit video/medya indirme fonksiyonu (Yeni versiyon)"""
-    try:
-        # RedditSave API'si
-        response = requests.post(
-            f"{SERVICES['reddit']}/info",
-            data={'url': url},
-            headers=HEADERS,
-            timeout=30
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            return data.get('url', data.get('media_url', ''))
-        return ''
-    except Exception as e:
-        logger.error(f"Reddit Error: {str(e)}", exc_info=True)
-        return ''
+        logger.error(f"TikTok API Hatası: {str(e)}")
+        return []
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = update.message.text.strip()
-    logger.info(f"Processing URL: {url}")
-
+    """Kullanıcıdan gelen mesajı işler ve TikTok medyasını gönderir."""
+    url = update.message.text
+    
     try:
-        # İşlem mesajını gönder
-        processing_msg = await update.message.reply_text("⏳ İçerik indiriliyor, lütfen bekleyin...")
-        
-        if 'tiktok.com' in url.lower():
-            video_url = await download_tiktok(url)
-            await processing_msg.delete()
+        # Sadece "https://vt.tiktok.com/" ile başlayan linkleri işle
+        if url.startswith("https://vt.tiktok.com/"):
+            # Önce TikTok API'si ile video veya resim indirmeyi dene
+            media_urls = await download_tiktok(url)
             
-            if video_url:
-                await update.message.reply_video(video=video_url)
-            else:
-                await update.message.reply_text("❌ TikTok içeriği indirilemedi. Linki kontrol edip tekrar deneyin.")
-
-        elif 'reddit.com' in url.lower():
-            media_url = await download_reddit(url)
-            await processing_msg.delete()
-            
-            if media_url:
-                if media_url.endswith(('.jpg', '.png', '.jpeg', '.gif')):
-                    await update.message.reply_photo(photo=media_url)
-                elif media_url.endswith(('.mp4', '.mov', '.webm')):
-                    await update.message.reply_video(video=media_url)
-                else:
-                    await update.message.reply_text("ℹ️ İndirilen içerik desteklenmeyen bir formatta.")
-            else:
-                await update.message.reply_text("❌ Reddit içeriği indirilemedi. Linki kontrol edip tekrar deneyin.")
-
-        elif 'twitter.com' in url.lower() or 'x.com' in url.lower():
-            video_url = await download_twitter(url)
-            await processing_msg.delete()
-            
-            if video_url:
-                await update.message.reply_video(video=video_url)
-            else:
-                await update.message.reply_text("❌ Twitter/X içeriği indirilemedi. Linki kontrol edip tekrar deneyin.")
-
+            if media_urls:  # Video veya resim bulundu
+                # Medya öğelerini tek tek gönder
+                for media in media_urls:
+                    try:
+                        if media["type"] == "video":
+                            await update.message.reply_video(video=media["url"])
+                        elif media["type"] == "photo":
+                            await update.message.reply_photo(photo=media["url"])
+                        logger.info(f"✅ TikTok medya gönderildi: {media['url']}")
+                    except Exception as e:
+                        logger.error(f"⛔ Medya gönderim hatası: {str(e)}")
+                        await update.message.reply_text(f"⚠️ Medya gönderilirken hata oluştu: {str(e)}")
+            else:  # Video veya resim bulunamadı, hedef bota yönlendir
+                await update.message.reply_text("⏳ TikTok hikayesi veya desteklenmeyen link, hedef bota yönlendiriliyor...")
+                
+                # Hedef bota linki gönder
+                target_bot = Bot(token=TOKEN)
+                await target_bot.send_message(chat_id=TARGET_BOT_USERNAME, text=url)
+                
+                # Hedef botun yanıtını bekleyin (örneğin, 10 saniye)
+                await update.message.reply_text("✅ Hedef bot medyayı işliyor...")
         else:
-            await processing_msg.delete()
-            await update.message.reply_text("⚠️ Desteklenmeyen link formatı. Lütfen TikTok, Reddit veya Twitter/X linki gönderin.")
-
-    except Exception as e:
-        logger.error(f"Genel Hata: {str(e)}", exc_info=True)
-        try:
-            await processing_msg.delete()
-        except:
+            # TikTok linki değilse, hiçbir şey yapma (görmezden gel)
             pass
-        await update.message.reply_text("⚠️ İşlem sırasında bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
+    except Exception as e:
+        logger.error(f"⛔ Kritik hata: {str(e)}")
+        await update.message.reply_text(f"⚠️ Üzgünüm, şu hata oluştu:\n{str(e)}")
 
 if __name__ == '__main__':
+    # Botu başlat
     app = Application.builder().token(TOKEN).build()
+    
+    # /start komutu için handler
     app.add_handler(CommandHandler("start", start))
+    
+    # Tüm mesajları işleyen handler (filtreleme if koşulu içinde yapılıyor)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    logger.info("Bot başlatılıyor...")
     app.run_polling()
