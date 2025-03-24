@@ -6,6 +6,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 import yt_dlp as youtube_dl
 from bs4 import BeautifulSoup
 import asyncpraw as praw
+import re
 
 # Ortam Değişkenleri
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -62,11 +63,9 @@ async def download_tiktok(url: str) -> list:
             "https://tiktok-video-no-watermark2.p.rapidapi.com/",
             headers=headers,
             params=params,
-            timeout=10
+            timeout=15
         )
         data = response.json()
-        
-        logger.info(f"TikTok API Yanıtı: {data}")
         
         media_urls = []
         if "data" in data:
@@ -77,34 +76,32 @@ async def download_tiktok(url: str) -> list:
                     media_urls.append({"type": "photo", "url": image})
         return media_urls
     except Exception as e:
-        logger.error(f"TikTok API Hatası: {str(e)}")
+        logger.error(f"TikTok Hatası: {str(e)}")
         return []
 
 async def download_reddit(url: str) -> list:
     """Reddit gönderilerini indirir."""
     try:
-        # URL'yi düzelt
-        if '/s/' in url:
-            url = url.replace('/s/', '/comments/')
+        # URL düzeltme
+        url = re.sub(r'/s/(\w+)$', r'/comments/\1', url)
         
         if not any(p in url for p in ['/comments/', '/r/']):
-            logger.error(f"Geçersiz Reddit URL: {url}")
             return []
             
-        submission = await reddit.submission(url=url)
+        submission = await reddit.submission(url=url.split('?')[0])
         await submission.load()
         
         media_urls = []
         
-        # Video kontrolü
-        if hasattr(submission, 'is_video') and submission.is_video:
+        # Video
+        if getattr(submission, 'is_video', False):
             try:
                 video_url = submission.media['reddit_video']['fallback_url'].split('?')[0]
                 media_urls.append({"type": "video", "url": video_url})
             except:
                 pass
         
-        # Galeri kontrolü
+        # Galeri
         elif hasattr(submission, 'gallery_data'):
             try:
                 for item in submission.gallery_data['items']:
@@ -115,158 +112,111 @@ async def download_reddit(url: str) -> list:
             except:
                 pass
         
-        # Tek resim kontrolü
+        # Tek resim
         elif submission.url.endswith(('jpg', 'jpeg', 'png', 'gif')):
             media_urls.append({"type": "photo", "url": submission.url})
             
-        return media_urls if media_urls else []
+        return media_urls
     except Exception as e:
-        logger.error(f"Reddit indirme hatası: {str(e)}")
+        logger.error(f"Reddit Hatası: {str(e)}")
         return []
 
 async def download_twitter(url: str) -> list:
     """Twitter gönderilerini indirir."""
     try:
-        # 1. Yöntem: TwitFix API
-        try:
-            tweet_id = url.split('/')[-1].split('?')[0]
-            api_url = f"https://twitfix.onrender.com/{tweet_id}"
-            response = requests.get(api_url, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                if data.get('media'):
-                    return [{"type": "video", "url": data['media'][0]['url']}]
-        except:
-            pass
+        # API alternatifleri
+        apis = [
+            f"https://twitfix.onrender.com/{url.split('/')[-1]}",
+            f"https://twitsave.com/info?url={url}",
+            f"https://vxtwitter.com/{url.split('twitter.com/')[-1]}"
+        ]
         
-        # 2. Yöntem: Twitsave API
-        try:
-            api_url = f"https://twitsave.com/info?url={url}"
-            response = requests.get(api_url, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                if data.get('media'):
-                    return [{"type": "video", "url": data['media'][0]['url']}]
-        except:
-            pass
+        for api_url in apis:
+            try:
+                response = requests.get(api_url, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('media'):
+                        return [{"type": "video", "url": data['media'][0]['url']}]
+                    elif data.get('url'):
+                        return [{"type": "video", "url": data['url']}]
+            except:
+                continue
         
-        # 3. Yöntem: Mobil sayfa
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; Pixel 3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.108 Mobile Safari/537.36'
-        }
+        # Son çare: Mobil sayfa
+        headers = {'User-Agent': 'Mozilla/5.0 (Linux; Android 10; Pixel 3)'}
         mobile_url = url.replace("twitter.com", "mobile.twitter.com").replace("x.com", "mobile.twitter.com")
-        response = requests.get(mobile_url, headers=headers, timeout=10)
+        response = requests.get(mobile_url, headers=headers, timeout=15)
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Video kontrolü
-        video_tag = soup.find('video')
-        if video_tag:
-            video_url = video_tag.get('src')
-            if video_url:
-                if not video_url.startswith('http'):
-                    video_url = f"https:{video_url}"
-                return [{"type": "video", "url": video_url}]
+        # Video
+        if video := soup.find('video'):
+            if video_url := video.get('src'):
+                return [{"type": "video", "url": f"https:{video_url}" if not video_url.startswith('http') else video_url}]
         
-        # Resim kontrolü
-        media_urls = []
-        images = soup.find_all('img', {'alt': 'Image'})
-        for img in images:
-            img_url = img.get('src')
-            if img_url and 'profile_images' not in img_url:
-                if not img_url.startswith('http'):
-                    img_url = f"https:{img_url}"
-                media_urls.append({"type": "photo", "url": img_url})
-                
-        return media_urls if media_urls else []
+        # Resimler
+        return [{"type": "photo", "url": f"https:{img['src']}"} for img in soup.select('img[alt="Image"]') if 'profile_images' not in img['src']]
+        
     except Exception as e:
-        logger.error(f"Twitter indirme hatası: {str(e)}")
+        logger.error(f"Twitter Hatası: {str(e)}")
         return []
 
 async def download_youtube(url: str) -> list:
     """YouTube videolarını indirir."""
+    ydl_opts = {
+        'format': 'best[ext=mp4]',
+        'quiet': True,
+        'no_warnings': True,
+        'extract_flat': False,
+        'ignoreerrors': True,
+        'geo_bypass': True,
+        'cookiefile': 'cookies.txt' if os.path.exists('cookies.txt') else None,
+    }
+    
     try:
-        ydl_opts = {
-            'format': 'best[ext=mp4]',
-            'quiet': True,
-            'no_warnings': True,
-            'extract_flat': False,
-            'cookiefile': 'cookies.txt',
-            'ignoreerrors': True,
-            'geo_bypass': True,
-            'geo_bypass_country': 'US',
-        }
-        
         with youtube_dl.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            
             if 'entries' in info:
                 info = info['entries'][0]
-                
-            if not info.get('url'):
-                logger.error("YouTube: Video URL'si alınamadı")
-                return []
-                
-            return [{
-                "type": "video",
-                "url": info['url'],
-                "title": info.get('title', 'YouTube Video')
-            }]
+            return [{"type": "video", "url": info['url'], "title": info.get('title', '')}]
     except Exception as e:
-        logger.error(f"YouTube indirme hatası: {str(e)}")
+        logger.error(f"YouTube Hatası: {str(e)}")
         return []
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Kullanıcıdan gelen mesajı işler ve medya gönderir."""
+    """Kullanıcı mesajlarını işler."""
     url = update.message.text.strip()
     
-    try:
-        if is_tiktok(url):
-            media_urls = await download_tiktok(url)
-            platform = "TikTok"
-        elif is_reddit(url):
-            media_urls = await download_reddit(url)
-            platform = "Reddit"
-        elif is_twitter(url):
-            media_urls = await download_twitter(url)
-            platform = "Twitter"
-        elif is_youtube(url):
-            media_urls = await download_youtube(url)
-            platform = "YouTube"
-        else:
-            await update.message.reply_text("⚠️ Desteklenmeyen link formatı.")
-            return
-            
-        if media_urls:
-            for media in media_urls:
-                try:
-                    if media["type"] == "video":
-                        await update.message.reply_video(
-                            video=media["url"],
-                            caption=f"🎥 {platform} videosu"
-                        )
-                    elif media["type"] == "photo":
-                        await update.message.reply_photo(
-                            photo=media["url"],
-                            caption=f"📷 {platform} resmi"
-                        )
-                    logger.info(f"✅ {platform} medya gönderildi: {media['url']}")
-                except Exception as e:
-                    logger.error(f"⛔ Medya gönderim hatası: {str(e)}")
-                    await update.message.reply_text(f"⚠️ Medya gönderilirken hata oluştu: {str(e)}")
-        else:
-            await update.message.reply_text(f"⚠️ {platform} içeriği indirilemedi. Linki kontrol edin.")
-    except Exception as e:
-        logger.error(f"⛔ Kritik hata: {str(e)}")
-        await update.message.reply_text(f"⚠️ Üzgünüm, şu hata oluştu:\n{str(e)}")
+    if is_tiktok(url):
+        media = await download_tiktok(url)
+        platform = "TikTok"
+    elif is_reddit(url):
+        media = await download_reddit(url)
+        platform = "Reddit"
+    elif is_twitter(url):
+        media = await download_twitter(url)
+        platform = "Twitter"
+    elif is_youtube(url):
+        media = await download_youtube(url)
+        platform = "YouTube"
+    else:
+        return await update.message.reply_text("⚠️ Desteklenmeyen link formatı.")
+    
+    if not media:
+        return await update.message.reply_text(f"⚠️ {platform} içeriği indirilemedi. Linki kontrol edin.")
+    
+    for item in media:
+        try:
+            if item["type"] == "video":
+                await update.message.reply_video(video=item["url"], caption=f"🎥 {platform}")
+            else:
+                await update.message.reply_photo(photo=item["url"], caption=f"📷 {platform}")
+        except Exception as e:
+            logger.error(f"Gönderim Hatası: {str(e)}")
+            await update.message.reply_text(f"⚠️ Medya gönderilemedi: {str(e)}")
 
 if __name__ == '__main__':
-    # Botu başlat
     app = Application.builder().token(TOKEN).build()
-    
-    # Komutlar
     app.add_handler(CommandHandler("start", start))
-    
-    # Tüm mesajları işleyen handler
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    
     app.run_polling()
