@@ -3,7 +3,7 @@ import logging
 import requests
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-import youtube_dl
+import yt_dlp as youtube_dl
 import praw
 from bs4 import BeautifulSoup
 
@@ -61,7 +61,8 @@ async def download_tiktok(url: str) -> list:
         response = requests.get(
             "https://tiktok-video-no-watermark2.p.rapidapi.com/",
             headers=headers,
-            params=params
+            params=params,
+            timeout=10
         )
         data = response.json()
         
@@ -82,23 +83,42 @@ async def download_tiktok(url: str) -> list:
 async def download_reddit(url: str) -> list:
     """Reddit gönderilerini indirir."""
     try:
+        # URL'yi düzelt (www.reddit.com/r/subreddit/s/... -> www.reddit.com/r/subreddit/comments/...)
+        if '/s/' in url:
+            url = url.replace('/s/', '/comments/')
+        
+        # URL'nin geçerli bir submission olup olmadığını kontrol et
+        if not any(p in url for p in ['/comments/', '/r/']):
+            logger.error(f"Geçersiz Reddit URL: {url}")
+            return []
+            
         submission = reddit.submission(url=url)
         media_urls = []
         
-        if submission.is_video:
-            media_urls.append({
-                "type": "video",
-                "url": submission.media['reddit_video']['fallback_url'].split('?')[0]
-            })
+        # Video kontrolü
+        if hasattr(submission, 'is_video') and submission.is_video:
+            try:
+                video_url = submission.media['reddit_video']['fallback_url'].split('?')[0]
+                media_urls.append({"type": "video", "url": video_url})
+            except:
+                pass
+        
+        # Galeri kontrolü
         elif hasattr(submission, 'gallery_data'):
-            for item in submission.gallery_data['items']:
-                media_id = item['media_id']
-                media_url = submission.media_metadata[media_id]['s']['u']
-                media_urls.append({"type": "photo", "url": media_url})
+            try:
+                for item in submission.gallery_data['items']:
+                    media_id = item['media_id']
+                    media_url = submission.media_metadata[media_id]['s']['u']
+                    media_url = media_url.replace('preview.redd.it', 'i.redd.it')
+                    media_urls.append({"type": "photo", "url": media_url})
+            except:
+                pass
+        
+        # Tek resim kontrolü
         elif submission.url.endswith(('jpg', 'jpeg', 'png', 'gif')):
             media_urls.append({"type": "photo", "url": submission.url})
             
-        return media_urls
+        return media_urls if media_urls else []
     except Exception as e:
         logger.error(f"Reddit indirme hatası: {str(e)}")
         return []
@@ -110,29 +130,21 @@ async def download_twitter(url: str) -> list:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
         
-        # URL'yi standardize et
-        parsed_url = url.replace("x.com", "twitter.com").replace("//twitter", "//mobile.twitter")
-        
-        # Önce twdown.net alternatifini dene
+        # 1. Alternatif: Twitsave API
         try:
-            api_url = f"https://twdown.net/download.php?url={parsed_url}"
+            api_url = f"https://twitsave.com/info?url={url}"
             response = requests.get(api_url, headers=headers, timeout=10)
             if response.status_code == 200:
-                soup = BeautifulSoup(response.text, 'html.parser')
-                download_btn = soup.find('a', {'id': 'download'})
-                if download_btn and download_btn.get('href'):
-                    return [{"type": "video", "url": download_btn['href']}]
+                data = response.json()
+                if data.get('media'):
+                    return [{"type": "video", "url": data['media'][0]['url']}]
         except:
             pass
         
-        # Mobil sayfayı parse et
-        if not parsed_url.startswith(('http://', 'https://')):
-            parsed_url = 'https://' + parsed_url
-            
-        response = requests.get(parsed_url, headers=headers, timeout=10)
+        # 2. Alternatif: Mobil sayfa
+        mobile_url = url.replace("twitter.com", "mobile.twitter.com").replace("x.com", "mobile.twitter.com")
+        response = requests.get(mobile_url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, 'html.parser')
-        
-        media_urls = []
         
         # Video kontrolü
         video_tag = soup.find('video')
@@ -141,9 +153,10 @@ async def download_twitter(url: str) -> list:
             if video_url:
                 if not video_url.startswith('http'):
                     video_url = f"https:{video_url}"
-                media_urls.append({"type": "video", "url": video_url})
+                return [{"type": "video", "url": video_url}]
         
         # Resim kontrolü
+        media_urls = []
         images = soup.find_all('img', {'alt': 'Image'})
         for img in images:
             img_url = img.get('src')
@@ -152,7 +165,7 @@ async def download_twitter(url: str) -> list:
                     img_url = f"https:{img_url}"
                 media_urls.append({"type": "photo", "url": img_url})
                 
-        return media_urls
+        return media_urls if media_urls else []
     except Exception as e:
         logger.error(f"Twitter indirme hatası: {str(e)}")
         return []
@@ -164,20 +177,26 @@ async def download_youtube(url: str) -> list:
             'format': 'best[ext=mp4]',
             'quiet': True,
             'no_warnings': True,
+            'extract_flat': False,
         }
         
         with youtube_dl.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
+            
+            # Çalma listesi kontrolü
             if 'entries' in info:
                 info = info['entries'][0]
                 
-            media_urls = [{
+            # URL'yi kontrol et
+            if not info.get('url'):
+                logger.error("YouTube: Video URL'si alınamadı")
+                return []
+                
+            return [{
                 "type": "video",
                 "url": info['url'],
                 "title": info.get('title', 'YouTube Video')
             }]
-            
-            return media_urls
     except Exception as e:
         logger.error(f"YouTube indirme hatası: {str(e)}")
         return []
