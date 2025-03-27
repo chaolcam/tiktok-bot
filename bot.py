@@ -26,7 +26,7 @@ AUTHORIZED_USER = int(os.environ.get('AUTHORIZED_USER', 0))
 PLUGIN_DIR = "plugins"
 os.makedirs(PLUGIN_DIR, exist_ok=True)
 
-# Bot ayarları (TÜM SOSYAL MEDYALAR KORUNDU)
+# Bot ayarları
 BOT_SETTINGS = {
     'tiktok': {
         'bots': ['@downloader_tiktok_bot', '@best_tiktok_downloader_bot'],
@@ -51,7 +51,7 @@ BOT_SETTINGS = {
 
 # Dinamik HELP mesajı
 BASE_HELP = f"""
-✨ <b>Social Media UserBot</b> ✨
+✨ <b>Social Media Downloader + Plugin Yönetici</b> ✨
 
 <code>.tiktok</code> <i>url</i> - TikTok video/albüm indir
 <code>.reddit</code> <i>url</i> - Reddit içeriği indir
@@ -70,171 +70,19 @@ BASE_HELP = f"""
 client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 client._help_message = BASE_HELP
 
-# ORİJİNAL FONKSİYONLARINIZ (Tüm platformlar korundu)
-async def get_unique_album_messages(bot_entity, first_msg_id, wait_time):
-    """Yinelenenleri kaldırarak albüm mesajlarını toplar"""
-    messages = []
-    message_ids = set()
-    logger.info(f"▸ Albüm taraması başladı (max {wait_time}s)")
-    
-    end_time = datetime.now().timestamp() + wait_time
-    
-    while datetime.now().timestamp() < end_time:
-        try:
-            async for msg in client.iter_messages(bot_entity, min_id=first_msg_id):
-                if msg.id > first_msg_id and msg.id not in message_ids:
-                    if msg.media or any(x in getattr(msg, 'text', '').lower() for x in ['tiktok', 'reddit', 'twitter', 'youtube']):
-                        messages.append(msg)
-                        message_ids.add(msg.id)
-            
-            if len(messages) > 0 and not await has_more_album_parts(bot_entity, messages[-1].id):
-                break
-                
-            await asyncio.sleep(BOT_SETTINGS['tiktok']['album_wait'])
-        except Exception as e:
-            logger.error(f"▸ Albüm tarama hatası: {str(e)}")
-            break
-    
-    logger.info(f"▸ Albüm taraması tamamlandı: {len(messages)} içerik")
-    return messages
-
-async def has_more_album_parts(bot_entity, last_msg_id):
-    """Daha fazla albüm parçası var mı kontrol eder"""
-    try:
-        async for msg in client.iter_messages(bot_entity, min_id=last_msg_id, limit=1):
-            if msg.id > last_msg_id:
-                return True
-        return False
-    except:
-        return False
-
-async def wait_for_response(bot_entity, after_msg_id, wait_time):
-    """Botun yanıtını bekler (TÜM PLATFORMLAR İÇİN)"""
-    logger.info(f"▸ Yanıt bekleniyor (max {wait_time}s) [@{bot_entity.username}]")
-    last_msg_id = after_msg_id
-    end_time = datetime.now().timestamp() + wait_time
-    
-    while datetime.now().timestamp() < end_time:
-        try:
-            async for msg in client.iter_messages(bot_entity, min_id=last_msg_id, limit=1):
-                if msg.id > last_msg_id:
-                    if msg.media or (hasattr(msg, 'text') and ('http' in msg.text or any(x in msg.text.lower() for x in ['tiktok', 'reddit', 'twitter', 'youtube']))):
-                        logger.info("▸ Yanıt alındı")
-                        return msg
-                    last_msg_id = msg.id
-            await asyncio.sleep(1)
-        except Exception as e:
-            logger.error(f"▸ Bekleme hatası: {str(e)}")
-            await asyncio.sleep(1)
-    
-    logger.warning("▸ Yanıt zaman aşımı")
-    return None
-
-# TÜM SOSYAL MEDYA KOMUTLARI
-@client.on(events.NewMessage(outgoing=True, pattern=r'^\.(tiktok|reddit|twitter|youtube)\s+(https?://\S+)$'))
-async def handle_social_command(event):
-    """Tüm sosyal medya komutlarını işler"""
-    if event.sender_id != AUTHORIZED_USER:
-        return
-    
-    try:
-        cmd = event.pattern_match.group(1).lower()
-        url = event.pattern_match.group(2)
-        settings = BOT_SETTINGS.get(cmd, {})
-        
-        await event.delete()
-        logger.info(f"▸ {cmd.upper()} komutu: {url}")
-        
-        estimated_time = settings.get('wait', 20)
-        if cmd == 'tiktok' and 'album' in url.lower():
-            estimated_time = 12
-        
-        start_time = datetime.now()
-        status_msg = await event.respond(
-            f"🔄 <b>{cmd.upper()}</b> işleniyor...\n"
-            f"⏳ Tahmini süre: <code>{estimated_time}s</code>",
-            parse_mode='html'
-        )
-        
-        result = None
-        for bot_username in settings.get('bots', []):
-            try:
-                bot_entity = await client.get_entity(bot_username)
-                
-                if cmd == 'tiktok':
-                    sent_msg = await client.send_message(bot_entity, url)
-                    first_response = await wait_for_response(bot_entity, sent_msg.id, settings.get('wait'))
-                    
-                    if not first_response:
-                        continue
-                        
-                    if settings.get('retry_text', '') in getattr(first_response, 'text', ''):
-                        continue
-                    
-                    if hasattr(first_response, 'grouped_id') or (first_response.text and "album" in first_response.text.lower()):
-                        result = await get_unique_album_messages(bot_entity, sent_msg.id, settings.get('wait'))
-                    else:
-                        result = [first_response]
-                else:
-                    sent_msg = await client.send_message(bot_entity, url)
-                    result = [await wait_for_response(bot_entity, sent_msg.id, settings.get('wait'))]
-                
-                if result and any(result):
-                    break
-            except Exception as e:
-                logger.error(f"▸ {cmd.upper()} hatası @{bot_username}: {str(e)}")
-                continue
-        
-        elapsed = (datetime.now() - start_time).total_seconds()
-        await status_msg.delete()
-        
-        if result and any(result):
-            unique_results = []
-            seen_ids = set()
-            for item in result:
-                if item and item.id not in seen_ids:
-                    unique_results.append(item)
-                    seen_ids.add(item.id)
-            
-            await event.respond(
-                f"✅ <b>{cmd.upper()}</b> başarıyla indirildi\n"
-                f"📦 <code>{len(unique_results)}</code> içerik • ⏱️ <code>{elapsed:.1f}s</code>",
-                parse_mode='html'
-            )
-            
-            for item in unique_results:
-                if item:
-                    await client.send_message(
-                        event.chat_id,
-                        file=item.media if item.media else item.text,
-                        parse_mode='html'
-                    )
-                    await asyncio.sleep(0.5)
-        else:
-            await event.respond(
-                f"❌ <b>{cmd.upper()}</b> indirilemedi\n"
-                f"⏱️ <code>{elapsed:.1f}s</code>",
-                parse_mode='html'
-            )
-            
-    except Exception as e:
-        logger.error(f"▸ {cmd.upper()} komut hatası: {str(e)}")
-        await event.respond(
-            f"⚠️ <b>{cmd.upper()} Hatası</b>\n<code>{str(e)}</code>",
-            parse_mode='html'
-        )
-
-# PLUGIN SİSTEMİ (Önceki gibi korundu)
+# PLUGIN SİSTEMİ
 async def load_plugins():
-    """Plugin yükleme fonksiyonu"""
+    """Başlangıçta tüm pluginleri yükler"""
     loaded = 0
     for filename in os.listdir(PLUGIN_DIR):
-        if filename.endswith('.py'):
+        if filename.endswith('.py') and not filename.startswith('_'):
             try:
+                plugin_name = filename[:-3]
                 plugin_path = os.path.join(PLUGIN_DIR, filename)
-                spec = importlib.util.spec_from_file_location(filename[:-3], plugin_path)
+                
+                spec = importlib.util.spec_from_file_location(plugin_name, plugin_path)
                 module = importlib.util.module_from_spec(spec)
-                sys.modules[filename[:-3]] = module
+                sys.modules[plugin_name] = module
                 spec.loader.exec_module(module)
                 
                 if hasattr(module, 'register_plugin'):
@@ -242,37 +90,202 @@ async def load_plugins():
                     loaded += 1
                     logger.info(f"▸ Plugin yüklendi: {filename}")
             except Exception as e:
-                logger.error(f"▸ Plugin yükleme hatası ({filename}): {str(e)}")
+                logger.error(f"▸ Plugin hatası ({filename}): {str(e)}")
     return loaded
 
-@client.on(events.NewMessage(outgoing=True, pattern=r'^\.help$'))
-async def handle_help(event):
-    """Güncellenmiş help komutu"""
-    if event.sender_id == AUTHORIZED_USER:
-        await event.delete()
+@client.on(events.NewMessage(outgoing=True, pattern=r'^\.install$'))
+async def handle_install(event):
+    """Plugin yükler"""
+    if event.sender_id != AUTHORIZED_USER:
+        return
+    
+    reply = await event.get_reply_message()
+    if not reply or not reply.document or not reply.file.name.endswith('.py'):
+        await event.edit("❌ Lütfen bir .py dosyasına yanıt verin")
+        return
+    
+    try:
+        plugin_path = os.path.join(PLUGIN_DIR, reply.file.name)
+        await reply.download_media(file=plugin_path)
+        
+        plugin_name = reply.file.name[:-3]
+        spec = importlib.util.spec_from_file_location(plugin_name, plugin_path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[plugin_name] = module
+        spec.loader.exec_module(module)
+        
+        if hasattr(module, 'register_plugin'):
+            module.register_plugin(client)
+            await event.edit(f"✅ **{reply.file.name}** yüklendi!")
+        else:
+            os.remove(plugin_path)
+            await event.edit("❌ Plugin geçersiz: register_plugin fonksiyonu yok")
+    except Exception as e:
+        await event.edit(f"❌ Yükleme hatası:\n`{str(e)}`")
+
+@client.on(events.NewMessage(outgoing=True, pattern=r'^\.uninstall\s+(\w+)$'))
+async def handle_uninstall(event):
+    """Plugin kaldırır"""
+    if event.sender_id != AUTHORIZED_USER:
+        return
+    
+    plugin_name = event.pattern_match.group(1)
+    plugin_path = os.path.join(PLUGIN_DIR, f"{plugin_name}.py")
+    
+    if os.path.exists(plugin_path):
+        os.remove(plugin_path)
+        await event.edit(f"✅ **{plugin_name}** kaldırıldı")
+    else:
+        await event.edit(f"❌ Plugin bulunamadı: `{plugin_name}`")
+
+@client.on(events.NewMessage(outgoing=True, pattern=r'^\.plugins$'))
+async def handle_plugins(event):
+    """Yüklü pluginleri listeler"""
+    if event.sender_id != AUTHORIZED_USER:
+        return
+    
+    plugins = [f for f in os.listdir(PLUGIN_DIR) if f.endswith('.py')]
+    msg = "📂 **Yüklü Pluginler:**\n\n" + "\n".join(f"▸ `{p}`" for p in plugins) if plugins else "❌ Hiç plugin yüklü değil"
+    await event.edit(msg)
+
+# SOSYAL MEDYA FONKSİYONLARI
+async def get_unique_album_messages(bot_entity, first_msg_id, wait_time):
+    """Albüm mesajlarını toplar"""
+    messages = []
+    end_time = datetime.now().timestamp() + wait_time
+    
+    while datetime.now().timestamp() < end_time:
+        try:
+            async for msg in client.iter_messages(bot_entity, min_id=first_msg_id):
+                if msg.id > first_msg_id and msg not in messages:
+                    if msg.media or any(x in getattr(msg, 'text', '').lower() for x in ['tiktok', 'reddit', 'twitter', 'youtube']):
+                        messages.append(msg)
+            await asyncio.sleep(1)
+        except Exception as e:
+            logger.error(f"▸ Albüm tarama hatası: {str(e)}")
+            break
+    
+    return messages
+
+async def wait_for_response(bot_entity, after_msg_id, wait_time):
+    """Bot yanıtını bekler"""
+    end_time = datetime.now().timestamp() + wait_time
+    last_msg_id = after_msg_id
+    
+    while datetime.now().timestamp() < end_time:
+        try:
+            async for msg in client.iter_messages(bot_entity, min_id=last_msg_id, limit=1):
+                if msg.id > last_msg_id:
+                    if msg.media or any(x in getattr(msg, 'text', '').lower() for x in ['http', 'tiktok', 'reddit', 'twitter', 'youtube']):
+                        return msg
+                    last_msg_id = msg.id
+            await asyncio.sleep(1)
+        except Exception as e:
+            logger.error(f"▸ Yanıt bekleme hatası: {str(e)}")
+            await asyncio.sleep(1)
+    
+    return None
+
+# SOSYAL MEDYA KOMUTLARI
+@client.on(events.NewMessage(outgoing=True, pattern=r'^\.(tiktok|reddit|twitter|youtube)\s+(https?://\S+)$'))
+async def handle_social_command(event):
+    """Tüm sosyal medya komutları"""
+    if event.sender_id != AUTHORIZED_USER:
+        return
+    
+    cmd = event.pattern_match.group(1)
+    url = event.pattern_match.group(2)
+    settings = BOT_SETTINGS.get(cmd, {})
+    
+    await event.delete()
+    logger.info(f"▸ {cmd.upper()} isteği: {url}")
+    
+    estimated_time = settings.get('wait', 20)
+    status_msg = await event.respond(
+        f"🔄 <b>{cmd.upper()}</b> işleniyor...\n⏳ Tahmini: <code>{estimated_time}s</code>",
+        parse_mode='html'
+    )
+    
+    start_time = datetime.now()
+    result = None
+    
+    for bot_username in settings.get('bots', []):
+        try:
+            bot_entity = await client.get_entity(bot_username)
+            sent_msg = await client.send_message(bot_entity, url)
+            
+            if cmd == 'tiktok':
+                first_response = await wait_for_response(bot_entity, sent_msg.id, settings.get('wait'))
+                if not first_response:
+                    continue
+                
+                if settings.get('retry_text', '') in getattr(first_response, 'text', ''):
+                    continue
+                
+                if hasattr(first_response, 'grouped_id') or 'album' in getattr(first_response, 'text', '').lower():
+                    result = await get_unique_album_messages(bot_entity, sent_msg.id, settings.get('wait'))
+                else:
+                    result = [first_response]
+            else:
+                result = [await wait_for_response(bot_entity, sent_msg.id, settings.get('wait'))]
+            
+            if result:
+                break
+        except Exception as e:
+            logger.error(f"▸ {cmd.upper()} hatası @{bot_username}: {str(e)}")
+            continue
+    
+    elapsed = (datetime.now() - start_time).total_seconds()
+    await status_msg.delete()
+    
+    if result:
+        unique_results = []
+        seen_ids = set()
+        for item in result:
+            if item and item.id not in seen_ids:
+                unique_results.append(item)
+                seen_ids.add(item.id)
+        
         await event.respond(
-            getattr(client, '_help_message', BASE_HELP),
+            f"✅ <b>{cmd.upper()}</b> başarılı!\n📦 <code>{len(unique_results)}</code> içerik • ⏱️ <code>{elapsed:.1f}s</code>",
             parse_mode='html'
         )
+        
+        for item in unique_results:
+            if item.media:
+                await client.send_file(event.chat_id, item.media)
+            elif item.text:
+                await client.send_message(event.chat_id, item.text)
+            await asyncio.sleep(0.5)
+    else:
+        await event.respond(
+            f"❌ <b>{cmd.upper()}</b> başarısız\n⏱️ <code>{elapsed:.1f}s</code>",
+            parse_mode='html'
+        )
+
+# DİĞER KOMUTLAR
+@client.on(events.NewMessage(outgoing=True, pattern=r'^\.help$'))
+async def handle_help(event):
+    """Yardım mesajını gösterir"""
+    if event.sender_id == AUTHORIZED_USER:
+        await event.delete()
+        await event.respond(client._help_message, parse_mode='html')
 
 # BAŞLANGIÇ
 async def main():
     await client.start()
     me = await client.get_me()
-    
-    # Plugin yükle
     loaded_plugins = await load_plugins()
     
-    # Başlangıç mesajı
     start_msg = (
         f"🚀 <b>UserBot Aktif</b>\n"
         f"👤 <code>@{me.username}</code>\n"
-        f"🛠️ <b>Platformlar:</b> TikTok, Reddit, Twitter, YouTube\n"
         f"🔌 <b>Pluginler:</b> <code>{loaded_plugins}</code>\n"
+        f"🛠️ <b>Desteklenen Platformlar:</b> TikTok, Reddit, Twitter, YouTube\n"
         f"🕒 <code>{datetime.now().strftime('%d.%m.%Y %H:%M')}</code>"
     )
     await client.send_message('me', start_msg, parse_mode='html')
-    logger.info(f"▸ Bot başlatıldı ▸ @{me.username} ▸ {loaded_plugins} plugin")
+    logger.info(f"▸ Bot başlatıldı ▸ @{me.username}")
     
     await client.run_until_disconnected()
 
