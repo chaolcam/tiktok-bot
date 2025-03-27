@@ -47,5 +47,5 @@ async def handler(event):
     await event.reply(f"⚠️ **{platform.capitalize()} için uygun bir bot bulunamadı veya yanıt alınamadı.**")
 
 print("🚀 Bot çalışıyor... Telegram'dan .start yazarak komutları görebilirsiniz.")
-client.start()
+client.start(bot_token=None)
 client.run_until_disconnected()
