@@ -3,7 +3,6 @@ import asyncio
 import logging
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from telethon.tl.types import DocumentAttributeFilename
 
 # Logging ayarları
 logging.basicConfig(
@@ -22,7 +21,8 @@ AUTHORIZED_USER = int(os.environ.get('AUTHORIZED_USER', 0))
 BOT_SETTINGS = {
     'tiktok': {
         'bots': ['@downloader_tiktok_bot', '@best_tiktok_downloader_bot'],
-        'wait': 25
+        'wait': 25,
+        'retry_text': "Yanlış TikTok Linki"
     },
     'reddit': {
         'bots': ['@reddit_download_bot'],
@@ -43,9 +43,10 @@ HELP_MESSAGE = """
 
 🔹 **Komutlar:**
 `.tiktok <url>` - TikTok videosu indir
-`.reddit <url>` - Reddit içeriği indir (Otomatik en iyi kalite)
-`.twitter <url>` - Twitter içeriği indir (Otomatik medya dönüşümü)
+`.reddit <url>` - Reddit içeriği indir
+`.twitter <url>` - Twitter içeriği indir
 `.youtube <url>` - YouTube videosu indir
+`.help` - Bu yardım mesajını göster
 
 ⏳ **Reddit işlemleri 30-40 saniye sürebilir**
 """
@@ -102,7 +103,7 @@ async def wait_for_response(bot_entity, after_msg_id, wait_time):
         try:
             async for msg in client.iter_messages(bot_entity, min_id=last_msg_id, limit=1):
                 if msg.id > last_msg_id:
-                    if msg.media or (hasattr(msg, 'text') and ('http' in msg.text or any(x in msg.text.lower() for x in ['tiktok', 'reddit', 'twitter', 'youtube']))):
+                    if msg.media or (hasattr(msg, 'text') and ('http' in msg.text or any(x in msg.text.lower() for x in ['tiktok', 'reddit', 'twitter', 'youtube'])):
                         return msg
                     last_msg_id = msg.id
                     await asyncio.sleep(2)
@@ -112,31 +113,19 @@ async def wait_for_response(bot_entity, after_msg_id, wait_time):
     
     return None
 
-async def convert_twitter_file(message):
-    """Twitter dosyasını medyaya çevirir"""
+async def handle_tiktok(bot_entity, url):
+    """TikTok için özel işlem"""
     try:
-        if message.document:
-            # Dosya adını kontrol et
-            filename = None
-            for attr in message.document.attributes:
-                if isinstance(attr, DocumentAttributeFilename):
-                    filename = attr.file_name
-                    break
-            
-            if filename and any(ext in filename.lower() for ext in ['.jpg', '.jpeg', '.png', '.mp4', '.gif']):
-                # Dosyayı indir
-                temp_file = await message.download_media(file=bytes)
-                
-                # Medya olarak yeniden gönder
-                return await client.send_file(
-                    'me',  # Önce kendimize gönderiyoruz
-                    temp_file,
-                    force_document=False,
-                    caption=f"🔄 Twitter medyası: {filename}"
-                )
+        sent_msg = await client.send_message(bot_entity, url)
+        response = await wait_for_response(bot_entity, sent_msg.id, 15)
+        
+        # Eğer hatalı link mesajı gelirse None döndür
+        if response and BOT_SETTINGS['tiktok']['retry_text'] in response.text:
+            return None
+        return response
     except Exception as e:
-        logger.error(f"Twitter dosya dönüşüm hatası: {str(e)}")
-    return message
+        logger.error(f"TikTok hatası: {str(e)}")
+        return None
 
 @client.on(events.NewMessage(outgoing=True, pattern=r'^\.(tiktok|reddit|twitter|youtube)\s+(https?://\S+)$'))
 async def handle_command(event):
@@ -144,12 +133,15 @@ async def handle_command(event):
         return
     
     try:
-        await event.delete()
         cmd = event.pattern_match.group(1).lower()
         url = event.pattern_match.group(2)
         settings = BOT_SETTINGS.get(cmd, {})
         
-        status_msg = await event.respond(f"⏳ {cmd.upper()} işleniyor (Bu {settings.get('wait', 25)} saniye sürebilir)...")
+        # Komut mesajını sil
+        await event.delete()
+        
+        # İşlem başladı mesajı
+        status_msg = await event.respond(f"⏳ {cmd.upper()} işleniyor...")
         
         result = None
         for bot_username in settings.get('bots', []):
@@ -158,14 +150,13 @@ async def handle_command(event):
                 
                 if cmd == 'reddit':
                     result = await handle_reddit_interaction(bot_entity, url)
+                elif cmd == 'tiktok':
+                    result = await handle_tiktok(bot_entity, url)
                 else:
                     sent_msg = await client.send_message(bot_entity, url)
                     result = await wait_for_response(bot_entity, sent_msg.id, settings.get('wait'))
                 
                 if result:
-                    # Twitter dosyalarını medyaya çevir
-                    if cmd == 'twitter':
-                        result = await convert_twitter_file(result)
                     break
             except Exception as e:
                 logger.error(f"{bot_username} hatası: {str(e)}")
@@ -173,13 +164,16 @@ async def handle_command(event):
         
         await status_msg.delete()
         if result:
-            await client.forward_messages(event.chat_id, result)
+            # İçerik indirildi mesajı
+            await event.respond(f"✅ {cmd.upper()} içeriği indirildi:")
+            # Medyayı gönder (orijinal gönderim şekliyle)
+            await client.send_message(event.chat_id, file=result.media if result.media else result.text)
         else:
-            await client.send_message(event.chat_id, "❌ İndirme başarısız oldu")
+            await event.respond(f"❌ {cmd.upper()} içeriği indirilemedi")
             
     except Exception as e:
         logger.error(f"Komut hatası: {str(e)}")
-        await client.send_message(event.chat_id, f"❌ Hata: {str(e)}")
+        await event.respond(f"❌ Hata: {str(e)}")
 
 @client.on(events.NewMessage(outgoing=True, pattern=r'^\.help$'))
 async def handle_help(event):
