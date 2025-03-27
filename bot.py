@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+import re
 from telethon import TelegramClient, events, Button
 from telethon.sessions import StringSession
 from telethon.tl.types import InputPeerUser
@@ -17,7 +18,8 @@ API_ID = int(os.environ.get('API_ID', 0))
 API_HASH = os.environ.get('API_HASH', '')
 STRING_SESSION = os.environ.get('STRING_SESSION', '')
 AUTHORIZED_USER = int(os.environ.get('AUTHORIZED_USER', 0))
-WAIT_TIME = int(os.environ.get('WAIT_TIME', 5))  # Varsayılan bekleme süresi 5 saniye
+BASE_WAIT_TIME = int(os.environ.get('BASE_WAIT_TIME', 10))  # Varsayılan 10 saniye
+REDDIT_EXTRA_WAIT = int(os.environ.get('REDDIT_EXTRA_WAIT', 5))  # Reddit için ek 5 saniye
 
 # Validate configuration
 if not all([API_ID, API_HASH, STRING_SESSION, AUTHORIZED_USER]):
@@ -43,10 +45,10 @@ HELP_MESSAGE = """
 `.youtube <url>` - YouTube videosu indir
 `.help` - Bu yardım mesajını göster
 
-🔹 **Özellikler:**
-- Otomatik kalite seçimi (Reddit)
-- Optimize edilmiş bekleme süreleri
-- Sadece sizin kullanımınız
+🔹 **Reddit Özellikleri:**
+- Otomatik "Media" seçeneği seçilir
+- Kalite butonlarını otomatik basar (720p > 480p > 360p)
+- Uzun bekleme süreleri ile güvenilir indirme
 """
 
 client = TelegramClient(
@@ -57,35 +59,47 @@ client = TelegramClient(
     auto_reconnect=True
 )
 
-async def press_buttons(event, response):
-    """Reddit botundaki butonlara otomatik basar"""
-    if not response.buttons:
-        return response
+async def handle_reddit_buttons(event, initial_response):
+    """Reddit botundaki tüm buton işlemlerini yönetir"""
+    try:
+        current_msg = initial_response
+        last_msg_id = current_msg.id
         
-    buttons = response.buttons
-    best_quality = None
-    
-    # En yüksek kaliteyi bul
-    for button_row in buttons:
-        for button in button_row:
-            text = button.text.lower()
-            if '720p' in text:
-                best_quality = button
-                break
-            elif '480p' in text and not best_quality:
-                best_quality = button
-            elif 'media' in text and not best_quality:
-                best_quality = button
-    
-    if best_quality:
-        logger.info(f"Buton bulundu: {best_quality.text}")
-        await best_quality.click()
-        await asyncio.sleep(3)  # Butona basıldıktan sonra bekle
-        async for new_msg in client.iter_messages(response.chat_id, limit=1):
-            if new_msg.id > response.id:
-                return new_msg
-    
-    return response
+        # 1. Adım: Media/File seçimi
+        if "Download album as media or file?" in current_msg.text:
+            for row in current_msg.buttons:
+                for button in row:
+                    if "media" in button.text.lower():
+                        logger.info("'Media' butonuna basılıyor...")
+                        current_msg = await button.click()
+                        await asyncio.sleep(3)  # Buton sonrası bekleme
+                        last_msg_id = current_msg.id
+                        break
+        
+        # 2. Adım: Kalite seçimi
+        async for new_msg in client.iter_messages(current_msg.chat_id, min_id=last_msg_id, wait_time=10):
+            if new_msg.id > last_msg_id and new_msg.buttons and "select the quality" in new_msg.text:
+                logger.info("Kalite butonları tespit edildi")
+                for row in new_msg.buttons:
+                    for button in row:
+                        if "720p" in button.text:
+                            logger.info("720p seçiliyor...")
+                            current_msg = await button.click()
+                            return current_msg
+                        elif "480p" in button.text:
+                            logger.info("480p seçiliyor...")
+                            current_msg = await button.click()
+                            return current_msg
+                        elif "360p" in button.text:
+                            logger.info("360p seçiliyor...")
+                            current_msg = await button.click()
+                            return current_msg
+        
+        return current_msg
+        
+    except Exception as e:
+        logger.error(f"Buton işleme hatası: {str(e)}")
+        return initial_response
 
 async def send_to_bot_and_get_response(platform, url, event):
     bots = BOT_MAPPING.get(platform, [])
@@ -101,24 +115,28 @@ async def send_to_bot_and_get_response(platform, url, event):
             # Mesajı gönder
             sent_message = await client.send_message(bot_entity, url)
             
-            # Reddit için daha uzun bekle
-            wait_time = WAIT_TIME + 3 if platform == 'reddit' else WAIT_TIME
+            # Platforma özel bekleme süresi
+            wait_time = BASE_WAIT_TIME
+            if platform == 'reddit':
+                wait_time += REDDIT_EXTRA_WAIT
             
             # Yanıtı bekle
             response = None
-            async for message in client.iter_messages(bot_entity, limit=1, wait_time=wait_time):
+            start_time = asyncio.get_event_loop().time()
+            
+            async for message in client.iter_messages(bot_entity, limit=10, wait_time=wait_time):
                 if message.id > sent_message.id:
                     response = message
+                    logger.info(f"Yanıt alındı ({(asyncio.get_event_loop().time()-start_time):.1f}s): {message.text[:50]}...")
+                    
+                    # Reddit için özel işlemler
+                    if platform == 'reddit':
+                        response = await handle_reddit_buttons(event, response)
+                        await asyncio.sleep(3)  # Ek bekleme süresi
+                    
                     break
             
-            if response:
-                logger.info(f"Yanıt alındı, işleniyor...")
-                
-                # Reddit botu için buton işleme
-                if platform == 'reddit' and response.buttons:
-                    response = await press_buttons(event, response)
-                
-                return response
+            return response
                 
         except Exception as e:
             logger.error(f"Hata: {str(e)}")
@@ -143,12 +161,12 @@ async def handle_download_command(event):
         
         response = await send_to_bot_and_get_response(command, url, event)
         
-        if response:
+        if response and (response.text or response.media):
             await event.edit(f"✅ **{command.capitalize()}** başarıyla indirildi!")
             await asyncio.sleep(1)
             await client.forward_messages(event.chat_id, response)
         else:
-            await event.edit(f"❌ **{command.capitalize()}** indirilemedi!")
+            await event.edit(f"❌ **{command.capitalize()}** indirilemedi! (Zaman aşımı)")
             
     except Exception as e:
         logger.error(f"Hata: {str(e)}", exc_info=True)
@@ -164,7 +182,7 @@ async def main():
         await client.start()
         me = await client.get_me()
         logger.info(f"Bot başlatıldı: @{me.username}")
-        await client.send_message('me', '🤖 Bot başarıyla başlatıldı!')
+        await client.send_message('me', f'🤖 Bot başarıyla başlatıldı!\n\nBekleme Süreleri:\n- Temel: {BASE_WAIT_TIME}s\n- Reddit: +{REDDIT_EXTRA_WAIT}s')
         await client.run_until_disconnected()
     except Exception as e:
         logger.error(f"Başlatma hatası: {str(e)}")
