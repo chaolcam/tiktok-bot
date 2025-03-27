@@ -27,42 +27,15 @@ BOT_MAPPING = {
 
 client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
-async def process_reddit_interaction(bot_entity, url):
-    """Reddit botuyla etkileşim"""
+async def wait_for_bot_response(bot_entity, sent_msg_id, wait_time=20):
+    """Hedef botun yanıtını bekler"""
     try:
-        # Linki gönder
-        sent_msg = await client.send_message(bot_entity, url)
-        
-        # Yanıtı bekle (20 saniye)
-        async for msg in client.iter_messages(bot_entity, limit=3, wait_time=20):
-            if msg.id > sent_msg.id:
-                # Media/file seçimi
-                if hasattr(msg, 'buttons') and "Download album as media or file?" in msg.text:
-                    for row in msg.buttons:
-                        for btn in row:
-                            if "media" in btn.text.lower():
-                                await btn.click()
-                                break
-                
-                # Kalite seçimi
-                elif hasattr(msg, 'buttons') and "Please select the quality." in msg.text:
-                    for row in msg.buttons:
-                        for btn in row:
-                            if "720p" in btn.text:
-                                await btn.click()
-                                break
-                            elif "480p" in btn.text:
-                                await btn.click()
-                                break
-                
-                # Sonuç mesajı
-                elif msg.media or (hasattr(msg, 'text') and 'http' in msg.text):
-                    return msg
-        
+        async for msg in client.iter_messages(bot_entity, min_id=sent_msg_id, wait_time=wait_time):
+            if msg.id > sent_msg_id and (msg.media or 'http' in getattr(msg, 'text', '')):
+                return msg
         return None
-        
     except Exception as e:
-        logger.error(f"Reddit hatası: {str(e)}")
+        logger.error(f"Yanıt bekleme hatası: {str(e)}")
         return None
 
 @client.on(events.NewMessage(outgoing=True, pattern=r'^\.(tiktok|reddit|twitter|youtube)\s+(https?://\S+)$'))
@@ -71,14 +44,14 @@ async def handle_command(event):
         return
     
     try:
-        cmd = event.pattern_match.group(1).lower()
-        url = event.pattern_match.group(2)
-        
         # Komut mesajını sil
         await event.delete()
         
+        cmd = event.pattern_match.group(1).lower()
+        url = event.pattern_match.group(2)
+        
         # İşlem başladı mesajı
-        status_msg = await event.respond(f"⏳ {cmd.capitalize()} işleniyor...")
+        status_msg = await event.respond(f"⌛️ {cmd.capitalize()} işleniyor...")
         
         # Hedef botlara sırayla deneme
         result = None
@@ -86,14 +59,26 @@ async def handle_command(event):
             try:
                 bot_entity = await client.get_entity(bot_username)
                 
+                # Linki hedef bota gönder
+                sent_msg = await client.send_message(bot_entity, url)
+                
+                # Reddit için özel işlem
                 if cmd == 'reddit':
-                    result = await process_reddit_interaction(bot_entity, url)
+                    # İlk yanıtı bekle
+                    first_response = await wait_for_bot_response(bot_entity, sent_msg.id)
+                    if first_response and hasattr(first_response, 'buttons'):
+                        # Buton varsa tıkla
+                        for row in first_response.buttons:
+                            for btn in row:
+                                if "media" in btn.text.lower() or "720p" in btn.text or "480p" in btn.text:
+                                    await btn.click()
+                                    break
+                    
+                    # Son yanıtı bekle
+                    result = await wait_for_bot_response(bot_entity, sent_msg.id)
                 else:
-                    await client.send_message(bot_entity, url)
-                    async for msg in client.iter_messages(bot_entity, limit=2, wait_time=15):
-                        if msg.media or (hasattr(msg, 'text') and 'http' in msg.text):
-                            result = msg
-                            break
+                    # Diğer botlar için normal bekleme
+                    result = await wait_for_bot_response(bot_entity, sent_msg.id)
                 
                 if result:
                     break
@@ -103,16 +88,16 @@ async def handle_command(event):
                 continue
         
         # Sonuçları işle
+        await status_msg.delete()
         if result:
-            await status_msg.delete()
-            await client.send_message(event.chat_id, f"✅ {cmd.capitalize()} indirme tamam!")
+            await client.send_message(event.chat_id, f"✅ {cmd.capitalize()} indirme başarılı!")
             await client.forward_messages(event.chat_id, result)
         else:
-            await status_msg.edit("❌ İndirme başarısız oldu")
+            await client.send_message(event.chat_id, "❌ İndirme başarısız oldu")
             
     except Exception as e:
         logger.error(f"Komut hatası: {str(e)}")
-        await event.respond(f"❌ Hata: {str(e)}")
+        await client.send_message(event.chat_id, f"❌ Hata: {str(e)}")
 
 async def main():
     await client.start()
