@@ -25,8 +25,8 @@ AUTHORIZED_USER = int(os.environ.get('AUTHORIZED_USER', 0))
 PLUGIN_DIR = "plugins"
 os.makedirs(PLUGIN_DIR, exist_ok=True)
 
-# Plugin veritabanı (restart'ta silinmemesi için)
-PLUGIN_DB = os.path.join(PLUGIN_DIR, "plugins.db")
+# Plugin veritabanı
+PLUGIN_DB = os.path.join(PLUGIN_DIR, "plugins.json")
 
 # Bot ayarları
 BOT_SETTINGS = {
@@ -64,12 +64,12 @@ client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 client.yardim_mesaji = YARDIM_MESAJI
 client.plugin_komutlari = {}
 
-# PLUGİN SİSTEMİ
+# PLUGIN YÜKLEME SİSTEMİ
 async def plugin_yukle(plugin_yolu):
     try:
         plugin_adi = os.path.basename(plugin_yolu)[:-3]
         
-        # Modül yükleme
+        # Modülü yükle
         loader = importlib.machinery.SourceFileLoader(plugin_adi, plugin_yolu)
         module = loader.load_module()
         
@@ -89,6 +89,13 @@ async def plugin_yukle(plugin_yolu):
                     client.plugin_komutlari[komut] = aciklama
             
             logger.info(f"✅ Plugin yüklendi: {plugin_adi} | Komutlar: {list(plugin_bilgisi['komutlar'].keys())}")
+            
+            # Yardım mesajını güncelle
+            plugin_yardim = "\n\n🔧 <b>Plugin Komutları:</b>\n" + "\n".join(
+                f"<code>{k}</code> - {v}" for k, v in client.plugin_komutlari.items()
+            )
+            client.yardim_mesaji = YARDIM_MESAJI + plugin_yardim
+            
             return True
         
         logger.error(f"❌ {plugin_adi}: plugin_kaydet fonksiyonu eksik")
@@ -99,28 +106,32 @@ async def plugin_yukle(plugin_yolu):
 
 async def pluginleri_yukle():
     """Başlangıçta tüm pluginleri yükler"""
+    # Kayıtlı pluginleri kontrol et
     if os.path.exists(PLUGIN_DB):
         with open(PLUGIN_DB, 'r') as f:
-            yuklenecekler = [line.strip() for line in f.readlines()]
+            yuklenecek_pluginler = [line.strip() for line in f.readlines()]
     else:
-        yuklenecekler = [f for f in os.listdir(PLUGIN_DIR) if f.endswith('.py')]
+        yuklenecek_pluginler = [f for f in os.listdir(PLUGIN_DIR) if f.endswith('.py')]
     
     yuklenen = 0
-    for dosya in yuklenecekler:
+    for dosya in yuklenecek_pluginler:
         if dosya.endswith('.py'):
-            if await plugin_yukle(os.path.join(PLUGIN_DIR, dosya)):
+            plugin_yolu = os.path.join(PLUGIN_DIR, dosya)
+            if await plugin_yukle(plugin_yolu):
                 yuklenen += 1
-    
-    # Yardım mesajını güncelle
-    if client.plugin_komutlari:
-        plugin_yardim = "\n\n🔧 <b>Plugin Komutları:</b>\n"
-        for komut, aciklama in client.plugin_komutlari.items():
-            plugin_yardim += f"<code>{komut}</code> - {aciklama}\n"
-        client.yardim_mesaji += plugin_yardim
+                # Veritabanına kaydet (eğer yoksa)
+                if os.path.exists(PLUGIN_DB):
+                    with open(PLUGIN_DB, 'r') as f:
+                        if dosya not in f.read():
+                            with open(PLUGIN_DB, 'a') as f:
+                                f.write(f"{dosya}\n")
+                else:
+                    with open(PLUGIN_DB, 'w') as f:
+                        f.write(f"{dosya}\n")
     
     return yuklenen
 
-# PLUGİN KOMUTLARI
+# PLUGIN KOMUTLARI
 @client.on(events.NewMessage(outgoing=True, pattern=r'^\.yükle$'))
 async def plugin_yukle_komut(event):
     if event.sender_id != AUTHORIZED_USER:
@@ -135,6 +146,7 @@ async def plugin_yukle_komut(event):
     await yanit.download_media(file=plugin_yolu)
     
     if await plugin_yukle(plugin_yolu):
+        # Veritabanına ekle
         with open(PLUGIN_DB, 'a') as f:
             f.write(f"{yanit.file.name}\n")
         
@@ -184,16 +196,12 @@ async def pluginleri_listele(event):
     for dosya in os.listdir(PLUGIN_DIR):
         if dosya.endswith('.py'):
             plugin_adi = dosya[:-3]
-            komutlar = [
-                f"<code>{k}</code>" 
-                for k, v in client.plugin_komutlari.items() 
-                if k.startswith(f'.{plugin_adi}')
-            ]
+            komutlar = [k for k in client.plugin_komutlari.keys() if k.startswith(f'.{plugin_adi}')]
             
             if komutlar:
                 plugin_listesi.append(f"▸ <b>{plugin_adi}</b> ({', '.join(komutlar)})")
             else:
-                plugin_listesi.append(f"▸ <b>{plugin_adi}</b> (Komutlar yüklenemedi)")
+                plugin_listesi.append(f"▸ <b>{plugin_adi}</b> (Komutlar yüklenmedi)")
     
     if plugin_listesi:
         await event.edit(
@@ -345,12 +353,18 @@ async def sonuclari_islet(event, durum_msg, baslangic, sonuc, servis_adi):
             parse_mode='html'
         )
 
-# YARDIM KOMUTU
+
 @client.on(events.NewMessage(outgoing=True, pattern=r'^\.yardım$'))
 async def yardim_goster(event):
+    """Güncel yardım mesajını gösterir"""
     if event.sender_id == AUTHORIZED_USER:
         await event.delete()
-        await event.respond(client.yardim_mesaji, parse_mode='html')
+        # Yardım mesajını her seferinde güncelle
+        plugin_yardim = "\n\n🔧 <b>Plugin Komutları:</b>\n" + "\n".join(
+            f"<code>{k}</code> - {v}" for k, v in client.plugin_komutlari.items()
+        )
+        guncel_yardim = YARDIM_MESAJI + plugin_yardim
+        await event.respond(guncel_yardim, parse_mode='html')
 
 # BAŞLANGIÇ
 async def baslat():
@@ -366,7 +380,7 @@ async def baslat():
         f"🕒 <code>{datetime.now().strftime('%d.%m.%Y %H:%M')}</code>"
     )
     await client.send_message('me', baslangic_mesaji, parse_mode='html')
-    logger.info(f"▸ Bot başlatıldı ▸ @{ben.username}")
+    logger.info(f"▸ Bot başlatıldı ▸ @{ben.username} ▸ {yuklenen_pluginler} plugin yüklendi")
     
     await client.run_until_disconnected()
 
