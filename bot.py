@@ -1,3 +1,4 @@
+import asyncio
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 import os
@@ -48,6 +49,9 @@ async def handler(event):
     
     await event.reply(f"⚠️ **{platform.capitalize()} için uygun bir bot bulunamadı veya yanıt alınamadı.**")
 
-print("🚀 Bot çalışıyor... Telegram'dan .start yazarak komutları görebilirsiniz.")
-client.connect()
-client.run_until_disconnected()
+async def main():
+    await client.connect()
+    print("🚀 Bot çalışıyor... Telegram'dan .start yazarak komutları görebilirsiniz.")
+    await client.run_until_disconnected()
+
+asyncio.run(main())
