@@ -63,7 +63,7 @@ async def handle_reddit_interaction(chat_id, original_msg_id):
                                 break
                 
                 # 2. Kalite seçimi
-                elif hasattr(message, 'buttons') and "select the quality" in message.text:
+                elif hasattr(message, 'buttons') and "Please select the quality." in message.text:
                     for row in message.buttons:
                         for button in row:
                             if "720p" in button.text:
@@ -76,7 +76,7 @@ async def handle_reddit_interaction(chat_id, original_msg_id):
                                 break
                 
                 # 3. Sonuç mesajı
-                elif message.media or (hasattr(message, 'text') and 'http' in message.text:
+                elif message.media or (hasattr(message, 'text') and 'http' in message.text):
                     final_response = message
                     break
         
@@ -96,7 +96,7 @@ async def get_bot_response(bot_username, url, platform):
         responses = []
         
         async for message in client.iter_messages(bot_entity, limit=5, wait_time=wait_time):
-            if message.text and 'http' in message.text or message.media:
+            if (message.text and 'http' in message.text) or message.media:
                 responses.append(message)
         
         if platform == 'reddit' and responses:
