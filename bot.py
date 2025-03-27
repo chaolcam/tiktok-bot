@@ -69,28 +69,32 @@ async def plugin_yukle(plugin_yolu):
     try:
         plugin_adi = os.path.basename(plugin_yolu)[:-3]
         
+        # Modül yükleme
         loader = importlib.machinery.SourceFileLoader(plugin_adi, plugin_yolu)
         module = loader.load_module()
         
         if hasattr(module, 'plugin_kaydet'):
+            # Plugin bilgilerini al
             plugin_bilgisi = getattr(module, 'PLUGIN_BILGISI', {
                 "isim": plugin_adi,
                 "komutlar": {}
             })
             
+            # Komutları kaydet
             module.plugin_kaydet(client)
             
+            # Komut bilgilerini güncelle
             if hasattr(module, 'PLUGIN_BILGISI'):
                 for komut, aciklama in plugin_bilgisi["komutlar"].items():
                     client.plugin_komutlari[komut] = aciklama
             
-            logger.info(f"✅ Plugin yüklendi: {plugin_adi}")
+            logger.info(f"✅ Plugin yüklendi: {plugin_adi} | Komutlar: {list(plugin_bilgisi['komutlar'].keys())}")
             return True
         
         logger.error(f"❌ {plugin_adi}: plugin_kaydet fonksiyonu eksik")
         return False
     except Exception as e:
-        logger.error(f"❌ Plugin hatası: {str(e)}")
+        logger.error(f"❌ Plugin hatası ({plugin_adi}): {str(e)}")
         return False
 
 async def pluginleri_yukle():
@@ -176,15 +180,28 @@ async def pluginleri_listele(event):
     if event.sender_id != AUTHORIZED_USER:
         return
     
-    pluginler = []
+    plugin_listesi = []
     for dosya in os.listdir(PLUGIN_DIR):
         if dosya.endswith('.py'):
             plugin_adi = dosya[:-3]
-            komutlar = [k for k in client.plugin_komutlari.keys() if k.startswith(f'.{plugin_adi}')]
-            pluginler.append(f"▸ <code>{plugin_adi}</code> (Komutlar: {', '.join(komutlar) or 'Yok'})")
+            komutlar = [
+                f"<code>{k}</code>" 
+                for k, v in client.plugin_komutlari.items() 
+                if k.startswith(f'.{plugin_adi}')
+            ]
+            
+            if komutlar:
+                plugin_listesi.append(f"▸ <b>{plugin_adi}</b> ({', '.join(komutlar)})")
+            else:
+                plugin_listesi.append(f"▸ <b>{plugin_adi}</b> (Komutlar yüklenemedi)")
     
-    mesaj = "📂 <b>Yüklü Pluginler:</b>\n\n" + "\n".join(pluginler) if pluginler else "❌ Hiç plugin yüklü değil"
-    await event.edit(mesaj, parse_mode='html')
+    if plugin_listesi:
+        await event.edit(
+            "📂 <b>Yüklü Pluginler:</b>\n\n" + "\n".join(plugin_listesi),
+            parse_mode='html'
+        )
+    else:
+        await event.edit("❌ Hiç plugin yüklü değil")
 
 # SOSYAL MEDYA FONKSİYONLARI
 async def mesajlari_al(bot_entity, ilk_msg_id, bekleme_suresi):
