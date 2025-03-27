@@ -1,7 +1,7 @@
 import os
 import asyncio
 import logging
-from telethon import TelegramClient, events
+from telethon import TelegramClient, events, Button
 from telethon.sessions import StringSession
 from telethon.tl.types import InputPeerUser
 
@@ -12,15 +12,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Configurations from environment variables
+# Configurations
 API_ID = int(os.environ.get('API_ID', 0))
 API_HASH = os.environ.get('API_HASH', '')
 STRING_SESSION = os.environ.get('STRING_SESSION', '')
 AUTHORIZED_USER = int(os.environ.get('AUTHORIZED_USER', 0))
+WAIT_TIME = int(os.environ.get('WAIT_TIME', 5))  # Varsayılan bekleme süresi 5 saniye
 
 # Validate configuration
-if not API_ID or not API_HASH or not STRING_SESSION or not AUTHORIZED_USER:
-    logger.error("Lütfen API_ID, API_HASH, STRING_SESSION ve AUTHORIZED_USER ortam değişkenlerini ayarlayın!")
+if not all([API_ID, API_HASH, STRING_SESSION, AUTHORIZED_USER]):
+    logger.error("Lütfen gerekli ortam değişkenlerini ayarlayın!")
     exit(1)
 
 # Bot mapping
@@ -33,23 +34,21 @@ BOT_MAPPING = {
 
 # Help message
 HELP_MESSAGE = """
-🤖 **Kişisel Sosyal Medya İndirme UserBot** 📥
+🤖 **Gelişmiş Sosyal Medya İndirme Botu** 📥
 
 🔹 **Komutlar:**
 `.tiktok <url>` - TikTok videosu indir
-`.reddit <url>` - Reddit içeriği indir
+`.reddit <url>` - Reddit içeriği indir (Otomatik en yüksek kalite)
 `.twitter <url>` - Twitter içeriği indir
 `.youtube <url>` - YouTube videosu indir
 `.help` - Bu yardım mesajını göster
 
-🔹 **Örnek Kullanım:**
-`.tiktok https://vm.tiktok.com/ZMexample/`
-`.reddit https://www.reddit.com/r/example/`
-
-⚠️ **Sadece yetkili kullanıcı komutları kullanabilir.**
+🔹 **Özellikler:**
+- Otomatik kalite seçimi (Reddit)
+- Optimize edilmiş bekleme süreleri
+- Sadece sizin kullanımınız
 """
 
-# Initialize client with connection retry
 client = TelegramClient(
     StringSession(STRING_SESSION),
     API_ID,
@@ -58,135 +57,124 @@ client = TelegramClient(
     auto_reconnect=True
 )
 
-async def ensure_connection():
-    retries = 0
-    max_retries = 5
-    while retries < max_retries:
-        try:
-            if not client.is_connected():
-                await client.connect()
-            if not await client.is_user_authorized():
-                logger.error("Oturum yetkilendirilmemiş!")
-                exit(1)
-            return True
-        except Exception as e:
-            retries += 1
-            logger.error(f"Bağlantı hatası (Deneme {retries}/{max_retries}): {str(e)}")
-            await asyncio.sleep(5)
-    return False
+async def press_buttons(event, response):
+    """Reddit botundaki butonlara otomatik basar"""
+    if not response.buttons:
+        return response
+        
+    buttons = response.buttons
+    best_quality = None
+    
+    # En yüksek kaliteyi bul
+    for button_row in buttons:
+        for button in button_row:
+            text = button.text.lower()
+            if '720p' in text:
+                best_quality = button
+                break
+            elif '480p' in text and not best_quality:
+                best_quality = button
+            elif 'media' in text and not best_quality:
+                best_quality = button
+    
+    if best_quality:
+        logger.info(f"Buton bulundu: {best_quality.text}")
+        await best_quality.click()
+        await asyncio.sleep(3)  # Butona basıldıktan sonra bekle
+        async for new_msg in client.iter_messages(response.chat_id, limit=1):
+            if new_msg.id > response.id:
+                return new_msg
+    
+    return response
 
 async def send_to_bot_and_get_response(platform, url, event):
     bots = BOT_MAPPING.get(platform, [])
     if not bots:
-        logger.error(f"{platform} için tanımlı bot bulunamadı")
+        logger.error(f"{platform} için bot bulunamadı")
         return None
         
     for bot_username in bots:
         try:
-            logger.info(f"{platform} için {bot_username} botuna istek gönderiliyor...")
-            
-            # Get the bot entity
+            logger.info(f"{bot_username} botuna istek gönderiliyor...")
             bot_entity = await client.get_entity(bot_username)
             
-            # Send the URL to the bot
+            # Mesajı gönder
             sent_message = await client.send_message(bot_entity, url)
-            logger.info(f"{bot_username} botuna mesaj gönderildi: {url}")
             
-            # Wait for response (max 30 seconds)
+            # Reddit için daha uzun bekle
+            wait_time = WAIT_TIME + 3 if platform == 'reddit' else WAIT_TIME
+            
+            # Yanıtı bekle
             response = None
-            async for message in client.iter_messages(bot_entity, limit=1, wait_time=30):
-                if message.id > sent_message.id and (message.text or message.media):
+            async for message in client.iter_messages(bot_entity, limit=1, wait_time=wait_time):
+                if message.id > sent_message.id:
                     response = message
-                    logger.info(f"{bot_username} botundan yanıt alındı")
                     break
             
             if response:
+                logger.info(f"Yanıt alındı, işleniyor...")
+                
+                # Reddit botu için buton işleme
+                if platform == 'reddit' and response.buttons:
+                    response = await press_buttons(event, response)
+                
                 return response
                 
         except Exception as e:
-            logger.error(f"{bot_username} botunda hata oluştu: {str(e)}")
+            logger.error(f"Hata: {str(e)}")
             continue
             
-    logger.error(f"{platform} için hiçbir bot yanıt vermedi")
+    logger.error(f"Hiçbir bot yanıt vermedi")
     return None
 
 @client.on(events.NewMessage(outgoing=True, pattern=r'^\.(tiktok|reddit|twitter|youtube)\s+(https?://\S+)$'))
 async def handle_download_command(event):
     try:
-        # Check if authorized user
         if event.sender_id != AUTHORIZED_USER:
-            logger.warning(f"Yetkisiz kullanıcı girişimi: {event.sender_id}")
             return
             
-        # Edit original command message to show processing
-        processing_text = f"⏳ **{event.pattern_match.group(1).capitalize()}** içeriği indiriliyor..."
-        await event.edit(processing_text)
+        command = event.pattern_match.group(1).lower()
+        url = event.pattern_match.group(2)
         
-        # Send to appropriate bot and get response
-        response = await send_to_bot_and_get_response(
-            event.pattern_match.group(1).lower(),
-            event.pattern_match.group(2),
-            event
-        )
+        processing_msg = await event.edit(f"⏳ **{command.capitalize()}** işleniyor...\n`{url}`")
+        
+        # Daha uzun bekleme süresi
+        await asyncio.sleep(2)
+        
+        response = await send_to_bot_and_get_response(command, url, event)
         
         if response:
-            # Send the response as a new message
-            sent_message = await event.respond("✅ İndirme tamamlandı:")
+            await event.edit(f"✅ **{command.capitalize()}** başarıyla indirildi!")
+            await asyncio.sleep(1)
             await client.forward_messages(event.chat_id, response)
-            
-            # Edit original message to show completion
-            await event.edit(f"✅ **{event.pattern_match.group(1).capitalize()}** indirildi!")
         else:
-            await event.edit(f"❌ **{event.pattern_match.group(1).capitalize()}** indirilemedi!")
+            await event.edit(f"❌ **{command.capitalize()}** indirilemedi!")
             
     except Exception as e:
-        logger.error(f"İndirme işlemi sırasında hata: {str(e)}", exc_info=True)
-        await event.edit(f"❌ **Hata oluştu!**\n\n`{str(e)}`")
+        logger.error(f"Hata: {str(e)}", exc_info=True)
+        await event.edit(f"❌ Hata!\n`{str(e)}`")
 
 @client.on(events.NewMessage(outgoing=True, pattern=r'^\.help$'))
 async def handle_help_command(event):
-    try:
-        # Check if authorized user
-        if event.sender_id != AUTHORIZED_USER:
-            return
-            
-        # Edit original message to show help
+    if event.sender_id == AUTHORIZED_USER:
         await event.edit(HELP_MESSAGE)
-        
-    except Exception as e:
-        logger.error(f"Yardım komutunda hata: {str(e)}", exc_info=True)
 
 async def main():
     try:
-        # Bağlantıyı sağlamayı garantile
-        if not await ensure_connection():
-            logger.error("Telegram'a bağlanılamadı!")
-            return
-
+        await client.start()
         me = await client.get_me()
-        logger.info(f"UserBot başlatıldı! ID: {me.id} - Kullanıcı adı: @{me.username}")
-        
-        # Oturum bilgilerini logla
-        logger.info(f"String Session: {STRING_SESSION[:15]}...")
-        logger.info(f"Yetkili kullanıcı: {AUTHORIZED_USER}")
-
-        # Başlangıç mesajını gönder
-        try:
-            await client.send_message('me', '🤖 UserBot başarıyla başlatıldı!')
-        except Exception as e:
-            logger.warning(f"Başlangıç mesajı gönderilemedi: {str(e)}")
-
+        logger.info(f"Bot başlatıldı: @{me.username}")
+        await client.send_message('me', '🤖 Bot başarıyla başlatıldı!')
         await client.run_until_disconnected()
-
     except Exception as e:
-        logger.error(f"Ana işlevde hata: {str(e)}", exc_info=True)
+        logger.error(f"Başlatma hatası: {str(e)}")
         raise
 
 if __name__ == '__main__':
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("UserBot kapatılıyor...")
+        logger.info("Bot kapatılıyor...")
     except Exception as e:
-        logger.error(f"Kritik hata: {str(e)}", exc_info=True)
+        logger.error(f"Kritik hata: {str(e)}")
         exit(1)
