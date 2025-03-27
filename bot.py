@@ -3,7 +3,7 @@ import asyncio
 import logging
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from telethon.tl.types import MessageEntityTextUrl
+from telethon.tl.types import DocumentAttributeFilename
 
 # Logging ayarları
 logging.basicConfig(
@@ -26,7 +26,7 @@ BOT_SETTINGS = {
     },
     'reddit': {
         'bots': ['@reddit_download_bot'],
-        'wait': 40  # Reddit için daha uzun bekleme
+        'wait': 40
     },
     'twitter': {
         'bots': ['@twitterimage_bot', '@embedybot'],
@@ -44,7 +44,7 @@ HELP_MESSAGE = """
 🔹 **Komutlar:**
 `.tiktok <url>` - TikTok videosu indir
 `.reddit <url>` - Reddit içeriği indir (Otomatik en iyi kalite)
-`.twitter <url>` - Twitter içeriği indir
+`.twitter <url>` - Twitter içeriği indir (Otomatik medya dönüşümü)
 `.youtube <url>` - YouTube videosu indir
 
 ⏳ **Reddit işlemleri 30-40 saniye sürebilir**
@@ -76,7 +76,7 @@ async def handle_reddit_interaction(bot_entity, url):
             return None
             
         # Media butonuna bas
-        await click_inline_button(first_resp, "Media")
+        await click_inline_button(first_resp, "media")
         
         # Kalite seçimini bekle
         quality_resp = await wait_for_response(bot_entity, first_resp.id, 15)
@@ -112,6 +112,32 @@ async def wait_for_response(bot_entity, after_msg_id, wait_time):
     
     return None
 
+async def convert_twitter_file(message):
+    """Twitter dosyasını medyaya çevirir"""
+    try:
+        if message.document:
+            # Dosya adını kontrol et
+            filename = None
+            for attr in message.document.attributes:
+                if isinstance(attr, DocumentAttributeFilename):
+                    filename = attr.file_name
+                    break
+            
+            if filename and any(ext in filename.lower() for ext in ['.jpg', '.jpeg', '.png', '.mp4', '.gif']):
+                # Dosyayı indir
+                temp_file = await message.download_media(file=bytes)
+                
+                # Medya olarak yeniden gönder
+                return await client.send_file(
+                    'me',  # Önce kendimize gönderiyoruz
+                    temp_file,
+                    force_document=False,
+                    caption=f"🔄 Twitter medyası: {filename}"
+                )
+    except Exception as e:
+        logger.error(f"Twitter dosya dönüşüm hatası: {str(e)}")
+    return message
+
 @client.on(events.NewMessage(outgoing=True, pattern=r'^\.(tiktok|reddit|twitter|youtube)\s+(https?://\S+)$'))
 async def handle_command(event):
     if event.sender_id != AUTHORIZED_USER:
@@ -137,6 +163,9 @@ async def handle_command(event):
                     result = await wait_for_response(bot_entity, sent_msg.id, settings.get('wait'))
                 
                 if result:
+                    # Twitter dosyalarını medyaya çevir
+                    if cmd == 'twitter':
+                        result = await convert_twitter_file(result)
                     break
             except Exception as e:
                 logger.error(f"{bot_username} hatası: {str(e)}")
