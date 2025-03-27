@@ -1,9 +1,11 @@
 from telethon import TelegramClient, events
+from telethon.sessions import StringSession
 import os
 
 # Config değişkenlerini al
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
+STRING_SESSION = os.getenv("STRING_SESSION")  # String session kullanıyoruz
 
 bot_mapping = {
     'tiktok': ['@downloader_tiktok_bot', '@best_tiktok_downloader_bot'],
@@ -12,7 +14,7 @@ bot_mapping = {
     'youtube': ['@embedybot']
 }
 
-client = TelegramClient('userbot', API_ID, API_HASH)
+client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
 @client.on(events.NewMessage(pattern=r'^\.start$', incoming=True, outgoing=False))
 async def start_handler(event):
@@ -47,5 +49,5 @@ async def handler(event):
     await event.reply(f"⚠️ **{platform.capitalize()} için uygun bir bot bulunamadı veya yanıt alınamadı.**")
 
 print("🚀 Bot çalışıyor... Telegram'dan .start yazarak komutları görebilirsiniz.")
-client.start(bot_token=None)
+client.connect()
 client.run_until_disconnected()
