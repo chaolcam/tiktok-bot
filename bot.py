@@ -21,19 +21,19 @@ AUTHORIZED_USER = int(os.environ.get('AUTHORIZED_USER', 0))
 BOT_SETTINGS = {
     'tiktok': {
         'bots': ['@downloader_tiktok_bot', '@best_tiktok_downloader_bot'],
-        'wait': 20  # 20 saniye bekle
+        'wait': 25  # 25 saniye bekle
     },
     'reddit': {
         'bots': ['@reddit_download_bot'],
-        'wait': 30  # 30 saniye bekle (butonlar için)
+        'wait': 35  # 35 saniye bekle (butonlar için)
     },
     'twitter': {
         'bots': ['@twitterimage_bot', '@embedybot'],
-        'wait': 20
+        'wait': 25
     },
     'youtube': {
         'bots': ['@embedybot'],
-        'wait': 20
+        'wait': 25
     }
 }
 
@@ -51,7 +51,6 @@ async def wait_for_response(bot_entity, after_msg_id, wait_time):
                     if msg.media or (hasattr(msg, 'text') and ('http' in msg.text or 'tiktok' in msg.text.lower()):
                         return msg
                     last_msg_id = msg.id
-                    # 2 saniye bekle ve tekrar kontrol et
                     await asyncio.sleep(2)
         except Exception as e:
             logger.error(f"Bekleme hatası: {str(e)}")
@@ -67,32 +66,30 @@ async def handle_reddit(bot_entity, url):
         
         # İlk yanıtı bekle (media/file seçimi)
         first_resp = await wait_for_response(bot_entity, sent_msg.id, 15)
-        if not first_resp:
+        if not first_resp or not hasattr(first_resp, 'buttons'):
             return None
         
         # Media butonuna bas
-        if hasattr(first_resp, 'buttons'):
-            for row in first_resp.buttons:
-                for btn in row:
-                    if "media" in btn.text.lower():
-                        await btn.click()
-                        break
+        for row in first_resp.buttons:
+            for btn in row:
+                if "media" in btn.text.lower():
+                    await btn.click()
+                    break
         
         # Kalite seçimini bekle
         quality_resp = await wait_for_response(bot_entity, first_resp.id, 15)
-        if not quality_resp:
+        if not quality_resp or not hasattr(quality_resp, 'buttons'):
             return None
         
         # En yüksek kaliteyi seç
-        if hasattr(quality_resp, 'buttons'):
-            for row in quality_resp.buttons:
-                for btn in row:
-                    if "720p" in btn.text:
-                        await btn.click()
-                        break
-                    elif "480p" in btn.text:
-                        await btn.click()
-                        break
+        for row in quality_resp.buttons:
+            for btn in row:
+                if "720p" in btn.text:
+                    await btn.click()
+                    break
+                elif "480p" in btn.text:
+                    await btn.click()
+                    break
         
         # Sonucu al
         return await wait_for_response(bot_entity, quality_resp.id, 15)
@@ -113,8 +110,8 @@ async def handle_command(event):
         url = event.pattern_match.group(2)
         settings = BOT_SETTINGS.get(cmd, {})
         
-        # İşlem başladı mesajı (20 saniye boyunca göster)
-        status_msg = await event.respond(f"⏳ {cmd.upper()} işleniyor (Lütfen bekleyin, bu işlem {settings.get('wait', 20)} saniye sürebilir)...")
+        # İşlem başladı mesajı
+        status_msg = await event.respond(f"⏳ {cmd.upper()} işleniyor (Bu işlem {settings.get('wait')} saniye sürebilir)...")
         
         result = None
         for bot_username in settings.get('bots', []):
@@ -125,7 +122,7 @@ async def handle_command(event):
                     result = await handle_reddit(bot_entity, url)
                 else:
                     sent_msg = await client.send_message(bot_entity, url)
-                    result = await wait_for_response(bot_entity, sent_msg.id, settings.get('wait', 20))
+                    result = await wait_for_response(bot_entity, sent_msg.id, settings.get('wait'))
                 
                 if result:
                     break
