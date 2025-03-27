@@ -46,7 +46,6 @@ HELP_MESSAGE = """
 `.reddit <url>` - Reddit içeriği indir
 `.twitter <url>` - Twitter içeriği indir
 `.youtube <url>` - YouTube videosu indir
-`.help` - Bu yardım mesajını göster
 
 ⏳ **Reddit işlemleri 30-40 saniye sürebilir**
 """
@@ -103,7 +102,7 @@ async def wait_for_response(bot_entity, after_msg_id, wait_time):
         try:
             async for msg in client.iter_messages(bot_entity, min_id=last_msg_id, limit=1):
                 if msg.id > last_msg_id:
-                    if msg.media or (hasattr(msg, 'text') and ('http' in msg.text or any(x in msg.text.lower() for x in ['tiktok', 'reddit', 'twitter', 'youtube'])):
+                    if msg.media or (hasattr(msg, 'text') and ('http' in msg.text or any(x in msg.text.lower() for x in ['tiktok', 'reddit', 'twitter', 'youtube']))):
                         return msg
                     last_msg_id = msg.id
                     await asyncio.sleep(2)
