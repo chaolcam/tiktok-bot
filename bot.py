@@ -1,102 +1,146 @@
 import os
+import asyncio
 import logging
-import requests
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telethon import TelegramClient, events
+from telethon.tl.types import InputPeerUser
 
-# Ortam Değişkenleri
-TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')  # Kendi botunuzun token'ı
-TARGET_BOT_USERNAME = "@best_tiktok_downloader_bot"  # Hedef botun kullanıcı adı
-TIKTOK_API_KEY = os.getenv('TIKTOK_API_KEY')  # TikTok API anahtarı
-
-# Loglama Ayarları
+# Logging configuration
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Kullanıcıya başlangıç mesajı gönderir."""
-    await update.message.reply_text('🎉 Merhaba! TikTok linklerini gönder.')
+# Configurations from environment variables (set these in Heroku config vars)
+API_ID = int(os.environ.get('API_ID', 0))
+API_HASH = os.environ.get('API_HASH', '')
+SESSION_NAME = os.environ.get('SESSION_NAME', 'userbot_session')
 
-async def download_tiktok(url: str) -> list:
-    """TikTok videolarını ve resimlerini API ile indirir."""
-    try:
-        headers = {
-            "X-RapidAPI-Key": TIKTOK_API_KEY,
-            "X-RapidAPI-Host": "tiktok-video-no-watermark2.p.rapidapi.com"
-        }
-        params = {"url": url}
-        response = requests.get(
-            "https://tiktok-video-no-watermark2.p.rapidapi.com/",
-            headers=headers,
-            params=params
-        )
-        data = response.json()
-        
-        # API yanıtını logla
-        logger.info(f"TikTok API Yanıtı: {data}")
-        
-        # Medya URL'lerini çek
-        media_urls = []
-        if "data" in data:
-            if "play" in data["data"]:  # Video URL'si
-                media_urls.append({"type": "video", "url": data["data"]["play"]})
-            if "images" in data["data"]:  # Resimler varsa
-                for image in data["data"]["images"]:
-                    media_urls.append({"type": "photo", "url": image})
-        return media_urls
-    except Exception as e:
-        logger.error(f"TikTok API Hatası: {str(e)}")
-        return []
+# Validate configuration
+if not API_ID or not API_HASH:
+    logger.error("Lütfen API_ID ve API_HASH ortam değişkenlerini ayarlayın!")
+    exit(1)
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Kullanıcıdan gelen mesajı işler ve TikTok medyasını gönderir."""
-    url = update.message.text
-    
-    try:
-        # Sadece "https://vt.tiktok.com/" ile başlayan linkleri işle
-        if url.startswith("https://vt.tiktok.com/"):
-            # Önce TikTok API'si ile video veya resim indirmeyi dene
-            media_urls = await download_tiktok(url)
+# Bot mapping
+BOT_MAPPING = {
+    'tiktok': ['@downloader_tiktok_bot', '@best_tiktok_downloader_bot'],
+    'reddit': ['@reddit_download_bot'],
+    'twitter': ['@twitterimage_bot', '@embedybot'],
+    'youtube': ['@embedybot']
+}
+
+# Help message
+HELP_MESSAGE = """
+📚 **Kullanılabilir Komutlar**
+
+`.tiktok <url>` - TikTok videosu indir
+`.reddit <url>` - Reddit içeriği indir
+`.twitter <url>` - Twitter içeriği indir
+`.youtube <url>` - YouTube videosu indir
+`.help` - Bu yardım mesajını göster
+
+🔗 **Örnek Kullanım**
+`.tiktok https://vm.tiktok.com/ZMexample/`
+`.reddit https://www.reddit.com/r/example/`
+"""
+
+# Initialize client
+client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+
+async def send_to_bot_and_get_response(platform, url, event):
+    bots = BOT_MAPPING.get(platform, [])
+    if not bots:
+        logger.error(f"{platform} için tanımlı bot bulunamadı")
+        return None
+        
+    for bot_username in bots:
+        try:
+            logger.info(f"{platform} için {bot_username} botuna istek gönderiliyor...")
             
-            if media_urls:  # Video veya resim bulundu
-                # Medya öğelerini tek tek gönder
-                for media in media_urls:
-                    try:
-                        if media["type"] == "video":
-                            await update.message.reply_video(video=media["url"])
-                        elif media["type"] == "photo":
-                            await update.message.reply_photo(photo=media["url"])
-                        logger.info(f"✅ TikTok medya gönderildi: {media['url']}")
-                    except Exception as e:
-                        logger.error(f"⛔ Medya gönderim hatası: {str(e)}")
-                        await update.message.reply_text(f"⚠️ Medya gönderilirken hata oluştu: {str(e)}")
-            else:  # Video veya resim bulunamadı, hedef bota yönlendir
-                await update.message.reply_text("⏳ TikTok hikayesi veya desteklenmeyen link, hedef bota yönlendiriliyor...")
+            # Get the bot entity
+            bot_entity = await client.get_entity(bot_username)
+            
+            # Send the URL to the bot
+            sent_message = await client.send_message(bot_entity, url)
+            logger.info(f"{bot_username} botuna mesaj gönderildi: {url}")
+            
+            # Wait for response (max 30 seconds)
+            response = None
+            async for message in client.iter_messages(bot_entity, limit=1, wait_time=30):
+                if message.id > sent_message.id and (message.text or message.media):
+                    response = message
+                    logger.info(f"{bot_username} botundan yanıt alındı")
+                    break
+            
+            if response:
+                return response
                 
-                # Hedef bota linki gönder
-                target_bot = Bot(token=TOKEN)
-                await target_bot.send_message(chat_id=TARGET_BOT_USERNAME, text=url)
-                
-                # Hedef botun yanıtını bekleyin (örneğin, 10 saniye)
-                await update.message.reply_text("✅ Hedef bot medyayı işliyor...")
+        except Exception as e:
+            logger.error(f"{bot_username} botunda hata oluştu: {str(e)}")
+            continue
+            
+    logger.error(f"{platform} için hiçbir bot yanıt vermedi")
+    return None
+
+@client.on(events.NewMessage(outgoing=True, pattern=r'^\.(tiktok|reddit|twitter|youtube)\s+(https?://\S+)$'))
+async def handle_download_command(event):
+    try:
+        # Extract platform and URL
+        command = event.pattern_match.group(1).lower()
+        url = event.pattern_match.group(2)
+        
+        # Delete the command message
+        await event.delete()
+        
+        # Notify user that processing has started
+        processing_msg = await event.respond(f"⏳ **{command.capitalize()}** içeriği indiriliyor...\n`{url}`")
+        
+        # Send to appropriate bot and get response
+        response = await send_to_bot_and_get_response(command, url, event)
+        
+        if response:
+            # Forward the response to the user
+            await client.forward_messages(event.chat_id, response)
+            await processing_msg.delete()
         else:
-            # TikTok linki değilse, hiçbir şey yapma (görmezden gel)
-            pass
+            await processing_msg.edit(f"❌ **{command.capitalize()}** içeriği indirilemedi.\n\n🔍 **Sorun giderme:**\n- Bağlantıyı kontrol edin\n- Bot geçici olarak hizmet vermiyor olabilir\n- Daha sonra tekrar deneyin")
+            
     except Exception as e:
-        logger.error(f"⛔ Kritik hata: {str(e)}")
-        await update.message.reply_text(f"⚠️ Üzgünüm, şu hata oluştu:\n{str(e)}")
+        logger.error(f"İndirme işlemi sırasında hata: {str(e)}", exc_info=True)
+        error_msg = f"❌ **Bir hata oluştu**\n\n`{str(e)}`\n\nLütfen daha sonra tekrar deneyin."
+        await event.respond(error_msg)
+
+@client.on(events.NewMessage(outgoing=True, pattern=r'^\.help$'))
+async def handle_help_command(event):
+    try:
+        # Delete the help command
+        await event.delete()
+        
+        # Send the help message
+        await event.respond(HELP_MESSAGE)
+        
+    except Exception as e:
+        logger.error(f"Yardım komutunda hata: {str(e)}", exc_info=True)
+
+async def main():
+    # Print some info when connected
+    logger.info("UserBot başlatıldı!")
+    logger.info(f"API ID: {API_ID}")
+    logger.info(f"Session: {SESSION_NAME}")
+    
+    # Start the client
+    await client.start()
+    logger.info("Oturum başarıyla başlatıldı!")
+    
+    # Set custom status
+    await client.send_message('me', '🤖 UserBot başarıyla başlatıldı!')
+    
+    await client.run_until_disconnected()
 
 if __name__ == '__main__':
-    # Botu başlat
-    app = Application.builder().token(TOKEN).build()
-    
-    # /start komutu için handler
-    app.add_handler(CommandHandler("start", start))
-    
-    # Tüm mesajları işleyen handler (filtreleme if koşulu içinde yapılıyor)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    
-    app.run_polling()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("UserBot kapatılıyor...")
+    except Exception as e:
+        logger.error(f"Ana işlevde hata: {str(e)}", exc_info=True)
