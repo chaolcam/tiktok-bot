@@ -17,7 +17,7 @@ bot_mapping = {
 
 client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
-@client.on(events.NewMessage(pattern=r'^\.start$', incoming=True, outgoing=False))
+@client.on(events.NewMessage(pattern=r'^\.start$', incoming=True))
 async def start_handler(event):
     help_text = """
     🤖 **UserBot Komut Listesi:**
@@ -29,28 +29,28 @@ async def start_handler(event):
     
     🚀 Komutu kullanarak ilgili içeriği indirebilirsiniz.
     """
-    await event.reply(help_text)
+    await event.edit(help_text)
 
-@client.on(events.NewMessage(pattern=r'^\.(tiktok|reddit|twitter|youtube) (.+)', incoming=True, outgoing=False))
+@client.on(events.NewMessage(pattern=r'^\.(tiktok|reddit|twitter|youtube) (.+)', incoming=True))
 async def handler(event):
     platform, link = event.pattern_match.groups()
     bot_list = bot_mapping.get(platform, [])
     
-    await event.reply(f"⏳ **{platform.capitalize()} içeriği indiriliyor...**")
+    await event.edit(f"⏳ **{platform.capitalize()} içeriği indiriliyor...**")
     
     for bot in bot_list:
         try:
             msg = await client.send_message(bot, link)
             response = await client.get_response(bot)
-            await event.reply(response.message)
+            await event.edit(response.message)
             return
         except:
             continue
     
-    await event.reply(f"⚠️ **{platform.capitalize()} için uygun bir bot bulunamadı veya yanıt alınamadı.**")
+    await event.edit(f"⚠️ **{platform.capitalize()} için uygun bir bot bulunamadı veya yanıt alınamadı.**")
 
 async def main():
-    await client.connect()
+    await client.start()
     print("🚀 Bot çalışıyor... Telegram'dan .start yazarak komutları görebilirsiniz.")
     await client.run_until_disconnected()
 
