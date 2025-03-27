@@ -1,57 +1,153 @@
+import os
 import asyncio
+import logging
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-import os
+from telethon.tl.types import InputPeerUser
 
-# Config değişkenlerini al
-API_ID = int(os.getenv("API_ID"))
-API_HASH = os.getenv("API_HASH")
-STRING_SESSION = os.getenv("STRING_SESSION")  # String session kullanıyoruz
+# Logging configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-bot_mapping = {
+# Configurations from environment variables
+API_ID = int(os.environ.get('API_ID', 0))
+API_HASH = os.environ.get('API_HASH', '')
+STRING_SESSION = os.environ.get('STRING_SESSION', '')
+AUTHORIZED_USER = int(os.environ.get('AUTHORIZED_USER', 0))  # Sizin Telegram ID'niz
+
+# Validate configuration
+if not API_ID or not API_HASH or not STRING_SESSION or not AUTHORIZED_USER:
+    logger.error("Lütfen API_ID, API_HASH, STRING_SESSION ve AUTHORIZED_USER ortam değişkenlerini ayarlayın!")
+    exit(1)
+
+# Bot mapping
+BOT_MAPPING = {
     'tiktok': ['@downloader_tiktok_bot', '@best_tiktok_downloader_bot'],
     'reddit': ['@reddit_download_bot'],
     'twitter': ['@twitterimage_bot', '@embedybot'],
     'youtube': ['@embedybot']
 }
 
+# Help message
+HELP_MESSAGE = """
+🤖 **Kişisel Sosyal Medya İndirme UserBot** 📥
+
+🔹 **Komutlar:**
+`.tiktok <url>` - TikTok videosu indir
+`.reddit <url>` - Reddit içeriği indir
+`.twitter <url>` - Twitter içeriği indir
+`.youtube <url>` - YouTube videosu indir
+`.help` - Bu yardım mesajını göster
+
+🔹 **Örnek Kullanım:**
+`.tiktok https://vm.tiktok.com/ZMexample/`
+`.reddit https://www.reddit.com/r/example/`
+
+⚠️ **Sadece yetkili kullanıcı komutları kullanabilir.**
+"""
+
+# Initialize client
 client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
-@client.on(events.NewMessage(pattern=r'^\.start$', incoming=True))
-async def start_handler(event):
-    help_text = """
-    🤖 **UserBot Komut Listesi:**
-    
-    📌 `.tiktok <link>` - TikTok videosu indirir.
-    📌 `.reddit <link>` - Reddit gönderisini indirir.
-    📌 `.twitter <link>` - Twitter videosu indirir.
-    📌 `.youtube <link>` - YouTube videosu indirir.
-    
-    🚀 Komutu kullanarak ilgili içeriği indirebilirsiniz.
-    """
-    await event.edit(help_text)
-
-@client.on(events.NewMessage(pattern=r'^\.(tiktok|reddit|twitter|youtube) (.+)', incoming=True))
-async def handler(event):
-    platform, link = event.pattern_match.groups()
-    bot_list = bot_mapping.get(platform, [])
-    
-    await event.edit(f"⏳ **{platform.capitalize()} içeriği indiriliyor...**")
-    
-    for bot in bot_list:
+async def send_to_bot_and_get_response(platform, url, event):
+    bots = BOT_MAPPING.get(platform, [])
+    if not bots:
+        logger.error(f"{platform} için tanımlı bot bulunamadı")
+        return None
+        
+    for bot_username in bots:
         try:
-            msg = await client.send_message(bot, link)
-            response = await client.get_response(bot)
-            await event.edit(response.message)
-            return
-        except:
+            logger.info(f"{platform} için {bot_username} botuna istek gönderiliyor...")
+            
+            # Get the bot entity
+            bot_entity = await client.get_entity(bot_username)
+            
+            # Send the URL to the bot
+            sent_message = await client.send_message(bot_entity, url)
+            logger.info(f"{bot_username} botuna mesaj gönderildi: {url}")
+            
+            # Wait for response (max 30 seconds)
+            response = None
+            async for message in client.iter_messages(bot_entity, limit=1, wait_time=30):
+                if message.id > sent_message.id and (message.text or message.media):
+                    response = message
+                    logger.info(f"{bot_username} botundan yanıt alındı")
+                    break
+            
+            if response:
+                return response
+                
+        except Exception as e:
+            logger.error(f"{bot_username} botunda hata oluştu: {str(e)}")
             continue
-    
-    await event.edit(f"⚠️ **{platform.capitalize()} için uygun bir bot bulunamadı veya yanıt alınamadı.**")
+            
+    logger.error(f"{platform} için hiçbir bot yanıt vermedi")
+    return None
+
+@client.on(events.NewMessage(outgoing=True, pattern=r'^\.(tiktok|reddit|twitter|youtube)\s+(https?://\S+)$'))
+async def handle_download_command(event):
+    try:
+        # Check if authorized user
+        if event.sender_id != AUTHORIZED_USER:
+            logger.warning(f"Yetkisiz kullanıcı girişimi: {event.sender_id}")
+            return
+            
+        # Edit original command message to show processing
+        processing_text = f"⏳ **{event.pattern_match.group(1).capitalize()}** içeriği indiriliyor..."
+        await event.edit(processing_text)
+        
+        # Send to appropriate bot and get response
+        response = await send_to_bot_and_get_response(
+            event.pattern_match.group(1).lower(),
+            event.pattern_match.group(2),
+            event
+        )
+        
+        if response:
+            # Send the response as a new message
+            sent_message = await event.respond("✅ İndirme tamamlandı:")
+            await client.forward_messages(event.chat_id, response)
+            
+            # Edit original message to show completion
+            await event.edit(f"✅ **{event.pattern_match.group(1).capitalize()}** indirildi!")
+        else:
+            await event.edit(f"❌ **{event.pattern_match.group(1).capitalize()}** indirilemedi!")
+            
+    except Exception as e:
+        logger.error(f"İndirme işlemi sırasında hata: {str(e)}", exc_info=True)
+        await event.edit(f"❌ **Hata oluştu!**\n\n`{str(e)}`")
+
+@client.on(events.NewMessage(outgoing=True, pattern=r'^\.help$'))
+async def handle_help_command(event):
+    try:
+        # Check if authorized user
+        if event.sender_id != AUTHORIZED_USER:
+            return
+            
+        # Edit original message to show help
+        await event.edit(HELP_MESSAGE)
+        
+    except Exception as e:
+        logger.error(f"Yardım komutunda hata: {str(e)}", exc_info=True)
 
 async def main():
-    await client.start()
-    print("🚀 Bot çalışıyor... Telegram'dan .start yazarak komutları görebilirsiniz.")
+    # Print some info when connected
+    me = await client.get_me()
+    logger.info(f"UserBot başlatıldı! ID: {me.id} - Kullanıcı adı: @{me.username}")
+    logger.info(f"Yetkili kullanıcı: {AUTHORIZED_USER}")
+    
+    # Set custom status
+    await client.send_message('me', '🤖 UserBot başarıyla başlatıldı! Sadece siz kullanabilirsiniz.')
+    
     await client.run_until_disconnected()
 
-asyncio.run(main())
+if __name__ == '__main__':
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("UserBot kapatılıyor...")
+    except Exception as e:
+        logger.error(f"Ana işlevde hata: {str(e)}", exc_info=True)
