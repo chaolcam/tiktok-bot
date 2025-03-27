@@ -1,9 +1,14 @@
 import os
+import re
+import sys
+import importlib
 import asyncio
 import logging
+import requests
 from datetime import datetime
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
+from telethon.tl.types import MessageMediaDocument
 
 # Logging ayarları
 logging.basicConfig(
@@ -18,6 +23,10 @@ API_ID = int(os.environ.get('API_ID', 0))
 API_HASH = os.environ.get('API_HASH', '')
 STRING_SESSION = os.environ.get('STRING_SESSION', '')
 AUTHORIZED_USER = int(os.environ.get('AUTHORIZED_USER', 0))
+
+# Plugin klasörü
+PLUGIN_DIR = "plugins"
+os.makedirs(PLUGIN_DIR, exist_ok=True)
 
 # Bot ayarları
 BOT_SETTINGS = {
@@ -42,8 +51,8 @@ BOT_SETTINGS = {
     }
 }
 
-HELP_MESSAGE = """
-✨ <b>Social Media Downloader Bot</b> ✨
+HELP_MESSAGE = f"""
+✨ <b>Social Media Downloader + Plugin Yönetici</b> ✨
 
 <code>.tiktok</code> <i>url</i> - TikTok video/albüm indir
 <code>.reddit</code> <i>url</i> - Reddit içeriği indir
@@ -51,11 +60,124 @@ HELP_MESSAGE = """
 <code>.youtube</code> <i>url</i> - YouTube videosu indir
 <code>.help</code> - Bu mesajı göster
 
+<b>🔌 Plugin Komutları:</b>
+<code>.install</code> <i>(yanıt)</i> - .py plugin yükle
+<code>.uninstall</code> <i>plugin_adi</i> - Plugin kaldır
+<code>.plugins</code> - Yüklü pluginleri listele
+
+📂 <b>Plugin Klasörü:</b> <code>{PLUGIN_DIR}</code>
 ⏳ <i>Albümler için ~10s, videolar için ~5s</i>
 """
 
 client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
+# Plugin Yönetim Sistemi
+async def download_plugin(event):
+    """Telegram'dan plugin dosyasını indirir"""
+    replied_msg = await event.get_reply_message()
+    if not replied_msg or not replied_msg.document:
+        await event.edit("❌ Lütfen bir `.py` dosyasına yanıt verin")
+        return None
+
+    if not replied_msg.file.name.endswith('.py'):
+        await event.edit("❌ Sadece Python (.py) dosyaları yüklenebilir")
+        return None
+
+    try:
+        plugin_name = replied_msg.file.name
+        plugin_path = os.path.join(PLUGIN_DIR, plugin_name)
+        await replied_msg.download_media(file=plugin_path)
+        logger.info(f"▸ Plugin indirildi: {plugin_name}")
+        return plugin_path
+    except Exception as e:
+        logger.error(f"▸ Plugin indirme hatası: {str(e)}")
+        await event.edit(f"❌ İndirme hatası: {str(e)}")
+        return None
+
+async def install_plugin(plugin_path):
+    """Plugin dosyasını yükler ve kaydeder"""
+    try:
+        plugin_name = os.path.basename(plugin_path)[:-3]  # .py uzantısını kaldır
+        spec = importlib.util.spec_from_file_location(plugin_name, plugin_path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[plugin_name] = module
+        spec.loader.exec_module(module)
+        
+        if hasattr(module, 'register_plugin'):
+            module.register_plugin(client)
+            logger.info(f"▸ Plugin başarıyla yüklendi: {plugin_name}")
+            return True
+        else:
+            logger.warning(f"▸ Plugin kayıt fonksiyonu bulunamadı: {plugin_name}")
+            return False
+    except Exception as e:
+        logger.error(f"▸ Plugin yükleme hatası: {str(e)}")
+        return False
+
+async def uninstall_plugin(plugin_name):
+    """Plugin'i kaldırır ve dosyasını siler"""
+    try:
+        # Dosyayı sil
+        plugin_path = os.path.join(PLUGIN_DIR, f"{plugin_name}.py")
+        if os.path.exists(plugin_path):
+            os.remove(plugin_path)
+            logger.info(f"▸ Plugin kaldırıldı: {plugin_name}")
+            return True
+        return False
+    except Exception as e:
+        logger.error(f"▸ Plugin kaldırma hatası: {str(e)}")
+        return False
+
+async def load_plugins():
+    """Başlangıçta tüm pluginleri yükler"""
+    logger.info("▸ Pluginler yükleniyor...")
+    for filename in os.listdir(PLUGIN_DIR):
+        if filename.endswith('.py'):
+            plugin_path = os.path.join(PLUGIN_DIR, filename)
+            await install_plugin(plugin_path)
+
+# Plugin Komutları
+@client.on(events.NewMessage(outgoing=True, pattern=r'^\.install$'))
+async def handle_install(event):
+    if event.sender_id != AUTHORIZED_USER:
+        return
+    
+    try:
+        plugin_path = await download_plugin(event)
+        if plugin_path:
+            success = await install_plugin(plugin_path)
+            if success:
+                await event.edit(f"✅ **Plugin yüklendi!**\n`{os.path.basename(plugin_path)}`")
+            else:
+                await event.edit("❌ Plugin yüklenemedi (geçersiz yapı)")
+    except Exception as e:
+        await event.edit(f"❌ Hata: `{str(e)}`")
+
+@client.on(events.NewMessage(outgoing=True, pattern=r'^\.uninstall\s+(\w+)$'))
+async def handle_uninstall(event):
+    if event.sender_id != AUTHORIZED_USER:
+        return
+    
+    plugin_name = event.pattern_match.group(1)
+    success = await uninstall_plugin(plugin_name)
+    if success:
+        await event.edit(f"✅ **Plugin kaldırıldı:** `{plugin_name}.py`")
+    else:
+        await event.edit(f"❌ Plugin bulunamadı: `{plugin_name}`")
+
+@client.on(events.NewMessage(outgoing=True, pattern=r'^\.plugins$'))
+async def handle_plugins(event):
+    if event.sender_id != AUTHORIZED_USER:
+        return
+    
+    plugins = [f for f in os.listdir(PLUGIN_DIR) if f.endswith('.py')]
+    if plugins:
+        msg = "📂 **Yüklü Pluginler:**\n\n" + "\n".join(f"▸ `{p}`" for p in plugins)
+    else:
+        msg = "❌ Hiç plugin yüklü değil"
+    await event.edit(msg)
+
+# Sosyal Medya İndirme Fonksiyonları (Önceki kodunuzla aynı)
 async def get_unique_album_messages(bot_entity, first_msg_id, wait_time):
     """Yinelenenleri kaldırarak albüm mesajlarını toplar"""
     messages = []
@@ -73,7 +195,6 @@ async def get_unique_album_messages(bot_entity, first_msg_id, wait_time):
                         message_ids.add(msg.id)
                         logger.info(f"▸ Albüm parçası eklendi: {len(messages)}. içerik")
             
-            # Albüm tamamlandı mı kontrol et
             if len(messages) > 0 and not await has_more_album_parts(bot_entity, messages[-1].id):
                 break
                 
@@ -156,12 +277,10 @@ async def handle_command(event):
         await event.delete()
         logger.info(f"▸ Yeni komut: {cmd.upper()} {url}")
         
-        # Tahmini süre hesapla
         estimated_time = settings.get('wait', 20)
         if cmd == 'tiktok' and 'album' in url.lower():
-            estimated_time = 12  # Albümler için ortalama süre
+            estimated_time = 12
         
-        # İşlem başladı mesajı
         start_time = datetime.now()
         status_msg = await event.respond(
             f"🔄 <b>{cmd.upper()}</b> işleniyor...\n"
@@ -177,8 +296,6 @@ async def handle_command(event):
                 
                 if cmd == 'tiktok':
                     result = await handle_tiktok(bot_entity, url)
-                elif cmd == 'reddit':
-                    result = await handle_reddit_interaction(bot_entity, url)
                 else:
                     sent_msg = await client.send_message(bot_entity, url)
                     result = [await wait_for_response(bot_entity, sent_msg.id, settings.get('wait'))]
@@ -189,12 +306,10 @@ async def handle_command(event):
                 logger.error(f"▸ Bot hatası @{bot_username}: {str(e)}")
                 continue
         
-        # Sonuçları işle
         elapsed = (datetime.now() - start_time).total_seconds()
-        
         await status_msg.delete()
+        
         if result and any(result):
-            # Gerçek içerik sayısını filtrele (yinelenenleri kaldır)
             unique_results = []
             seen_ids = set()
             for item in result:
@@ -215,7 +330,7 @@ async def handle_command(event):
                         file=item.media if item.media else item.text,
                         parse_mode='html'
                     )
-                    await asyncio.sleep(0.5)  # Flood önleme
+                    await asyncio.sleep(0.5)
         else:
             await event.respond(
                 f"❌ <b>{cmd.upper()}</b> indirilemedi\n"
@@ -249,13 +364,18 @@ async def main():
     
     logger.info(f"\n{BANNER}")
     logger.info(f"▸ UserBot başlatıldı ▸ @{me.username}")
-    logger.info(f"▸ Versiyon ▸ 2.1.0")
+    logger.info(f"▸ Versiyon ▸ 2.2.0 (Plugin Destekli)")
+    
+    # Pluginleri yükle
+    await load_plugins()
     
     # Başlangıç bildirimi
+    plugin_count = len([f for f in os.listdir(PLUGIN_DIR) if f.endswith('.py')])
     await client.send_message(
         'me',
         f"🚀 <b>UserBot Aktif</b>\n"
         f"👤 <code>@{me.username}</code>\n"
+        f"🛠️ <b>Pluginler:</b> <code>{plugin_count}</code>\n"
         f"🕒 <code>{datetime.now().strftime('%d.%m.%Y %H:%M')}</code>",
         parse_mode='html'
     )
