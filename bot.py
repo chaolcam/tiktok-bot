@@ -4,13 +4,6 @@ import logging
 from datetime import datetime
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from telethon.tl.types import DocumentAttributeFilename
-
-# ██████  ██████  ████████ 
-#██    ██ ██   ██    ██    
-#██    ██ ██████     ██    
-#██    ██ ██         ██    
-# ██████  ██         ██    
 
 # Logging ayarları
 logging.basicConfig(
@@ -20,23 +13,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ██████  ██████  ████████ 
-#██    ██ ██   ██    ██    
-#██    ██ ██████     ██    
-#██    ██ ██         ██    
-# ██████  ██         ██    
-
 # Config
 API_ID = int(os.environ.get('API_ID', 0))
 API_HASH = os.environ.get('API_HASH', '')
 STRING_SESSION = os.environ.get('STRING_SESSION', '')
 AUTHORIZED_USER = int(os.environ.get('AUTHORIZED_USER', 0))
-
-# ██████  ██████  ████████ 
-#██    ██ ██   ██    ██    
-#██    ██ ██████     ██    
-#██    ██ ██         ██    
-# ██████  ██         ██    
 
 # Bot ayarları
 BOT_SETTINGS = {
@@ -45,7 +26,7 @@ BOT_SETTINGS = {
         'wait': 15,
         'retry_wait': 8,
         'retry_text': "Yanlış TikTok Linki",
-        'album_wait': 3
+        'album_wait': 2  # Albüm tarama aralığı
     },
     'reddit': {
         'bots': ['@reddit_download_bot'],
@@ -61,12 +42,6 @@ BOT_SETTINGS = {
     }
 }
 
-# ██████  ██████  ████████ 
-#██    ██ ██   ██    ██    
-#██    ██ ██████     ██    
-#██    ██ ██         ██    
-# ██████  ██         ██    
-
 HELP_MESSAGE = """
 ✨ <b>Social Media Downloader Bot</b> ✨
 
@@ -76,51 +51,49 @@ HELP_MESSAGE = """
 <code>.youtube</code> <i>url</i> - YouTube videosu indir
 <code>.help</code> - Bu mesajı göster
 
-⏳ <i>TikTok albümleri 10-15s, Reddit 35s sürebilir</i>
+⏳ <i>Albümler için ~10s, videolar için ~5s</i>
 """
-
-# ██████  ██████  ████████ 
-#██    ██ ██   ██    ██    
-#██    ██ ██████     ██    
-#██    ██ ██         ██    
-# ██████  ██         ██    
 
 client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
-async def send_typing(chat, seconds):
-    """Yazıyor efekti"""
-    end_time = datetime.now().timestamp() + seconds
-    while datetime.now().timestamp() < end_time:
-        await client.send_read_acknowledge(chat)
-        await asyncio.sleep(2)
-
-async def format_time(seconds):
-    """Saniyeyi okunabilir zamana çevirir"""
-    mins, secs = divmod(seconds, 60)
-    return f"{mins:02d}:{secs:02d}"
-
-async def get_all_album_messages(bot_entity, first_msg_id, wait_time):
-    """Tüm albüm mesajlarını toplar"""
+async def get_unique_album_messages(bot_entity, first_msg_id, wait_time):
+    """Yinelenenleri kaldırarak albüm mesajlarını toplar"""
     messages = []
-    logger.info(f"▸ Albüm indirme başladı (max {wait_time}s)")
+    message_ids = set()
+    logger.info(f"▸ Albüm taraması başladı (max {wait_time}s)")
     
-    async with client.action(bot_entity, 'photo') as action:
-        end_time = datetime.now().timestamp() + wait_time
-        
-        while datetime.now().timestamp() < end_time:
-            try:
-                async for msg in client.iter_messages(bot_entity, min_id=first_msg_id):
-                    if msg.id > first_msg_id and (msg.media or 'tiktok' in getattr(msg, 'text', '').lower()):
-                        if msg not in messages:
-                            messages.append(msg)
-                            logger.info(f"▸ Albüm parçası eklendi: {len(messages)}. resim")
-                await asyncio.sleep(BOT_SETTINGS['tiktok']['album_wait'])
-            except Exception as e:
-                logger.error(f"▸ Albüm hatası: {str(e)}")
+    end_time = datetime.now().timestamp() + wait_time
+    
+    while datetime.now().timestamp() < end_time:
+        try:
+            async for msg in client.iter_messages(bot_entity, min_id=first_msg_id):
+                if msg.id > first_msg_id and msg.id not in message_ids:
+                    if msg.media or 'tiktok' in getattr(msg, 'text', '').lower():
+                        messages.append(msg)
+                        message_ids.add(msg.id)
+                        logger.info(f"▸ Albüm parçası eklendi: {len(messages)}. içerik")
+            
+            # Albüm tamamlandı mı kontrol et
+            if len(messages) > 0 and not await has_more_album_parts(bot_entity, messages[-1].id):
                 break
+                
+            await asyncio.sleep(BOT_SETTINGS['tiktok']['album_wait'])
+        except Exception as e:
+            logger.error(f"▸ Albüm tarama hatası: {str(e)}")
+            break
     
-    logger.info(f"▸ Albüm tamamlandı: {len(messages)} resim")
+    logger.info(f"▸ Albüm taraması tamamlandı: {len(messages)} içerik")
     return messages
+
+async def has_more_album_parts(bot_entity, last_msg_id):
+    """Daha fazla albüm parçası var mı kontrol eder"""
+    try:
+        async for msg in client.iter_messages(bot_entity, min_id=last_msg_id, limit=1):
+            if msg.id > last_msg_id:
+                return True
+        return False
+    except:
+        return False
 
 async def handle_tiktok(bot_entity, url):
     """TikTok için özel işlem"""
@@ -141,7 +114,7 @@ async def handle_tiktok(bot_entity, url):
         
         if hasattr(first_response, 'grouped_id') or (first_response.text and "album" in first_response.text.lower()):
             logger.info("▸ TikTok albümü tespit edildi")
-            return await get_all_album_messages(bot_entity, sent_msg.id, wait_time)
+            return await get_unique_album_messages(bot_entity, sent_msg.id, wait_time)
         
         return [first_response]
     except Exception as e:
@@ -183,16 +156,18 @@ async def handle_command(event):
         await event.delete()
         logger.info(f"▸ Yeni komut: {cmd.upper()} {url}")
         
+        # Tahmini süre hesapla
+        estimated_time = settings.get('wait', 20)
+        if cmd == 'tiktok' and 'album' in url.lower():
+            estimated_time = 12  # Albümler için ortalama süre
+        
         # İşlem başladı mesajı
         start_time = datetime.now()
         status_msg = await event.respond(
             f"🔄 <b>{cmd.upper()}</b> işleniyor...\n"
-            f"⏳ Tahmini süre: <code>{format_time(settings.get('wait', 20))}</code>",
+            f"⏳ Tahmini süre: <code>{estimated_time}s</code>",
             parse_mode='html'
         )
-        
-        # Yazıyor efekti
-        typing_task = asyncio.create_task(send_typing(event.chat_id, settings.get('wait', 20)))
         
         result = None
         for bot_username in settings.get('bots', []):
@@ -215,25 +190,32 @@ async def handle_command(event):
                 continue
         
         # Sonuçları işle
-        typing_task.cancel()
         elapsed = (datetime.now() - start_time).total_seconds()
         
         await status_msg.delete()
         if result and any(result):
-            success_msg = await event.respond(
+            # Gerçek içerik sayısını filtrele (yinelenenleri kaldır)
+            unique_results = []
+            seen_ids = set()
+            for item in result:
+                if item and item.id not in seen_ids:
+                    unique_results.append(item)
+                    seen_ids.add(item.id)
+            
+            await event.respond(
                 f"✅ <b>{cmd.upper()}</b> başarıyla indirildi\n"
-                f"📦 <code>{len(result)}</code> içerik • ⏱️ <code>{elapsed:.1f}s</code>",
+                f"📦 <code>{len(unique_results)}</code> içerik • ⏱️ <code>{elapsed:.1f}s</code>",
                 parse_mode='html'
             )
             
-            for item in result:
+            for item in unique_results:
                 if item:
                     await client.send_message(
                         event.chat_id,
                         file=item.media if item.media else item.text,
                         parse_mode='html'
                     )
-                    await asyncio.sleep(1)  # Flood önleme
+                    await asyncio.sleep(0.5)  # Flood önleme
         else:
             await event.respond(
                 f"❌ <b>{cmd.upper()}</b> indirilemedi\n"
