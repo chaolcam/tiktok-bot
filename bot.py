@@ -2,7 +2,7 @@ import os
 import asyncio
 import logging
 from telethon import TelegramClient, events
-from telethon.tl.types import InputPeerUser
+from telethon.tl.types import InputPeerUser, InputPeerChannel
 
 # Logging configuration
 logging.basicConfig(
@@ -11,14 +11,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Configurations from environment variables (set these in Heroku config vars)
+# Configurations from environment variables
 API_ID = int(os.environ.get('API_ID', 0))
 API_HASH = os.environ.get('API_HASH', '')
-SESSION_NAME = os.environ.get('SESSION_NAME', 'userbot_session')
+BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
 
 # Validate configuration
-if not API_ID or not API_HASH:
-    logger.error("Lütfen API_ID ve API_HASH ortam değişkenlerini ayarlayın!")
+if not API_ID or not API_HASH or not BOT_TOKEN:
+    logger.error("Lütfen API_ID, API_HASH ve BOT_TOKEN ortam değişkenlerini ayarlayın!")
     exit(1)
 
 # Bot mapping
@@ -31,21 +31,24 @@ BOT_MAPPING = {
 
 # Help message
 HELP_MESSAGE = """
-📚 **Kullanılabilir Komutlar**
+🤖 **Sosyal Medya İndirme Botu** 📥
 
+🔹 **Komutlar:**
 `.tiktok <url>` - TikTok videosu indir
 `.reddit <url>` - Reddit içeriği indir
 `.twitter <url>` - Twitter içeriği indir
 `.youtube <url>` - YouTube videosu indir
 `.help` - Bu yardım mesajını göster
 
-🔗 **Örnek Kullanım**
+🔹 **Örnek Kullanım:**
 `.tiktok https://vm.tiktok.com/ZMexample/`
 `.reddit https://www.reddit.com/r/example/`
+
+⚠️ **Not:** Bot hem özel mesajlarda hem de gruplarda çalışır.
 """
 
 # Initialize client
-client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+client = TelegramClient('bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
 async def send_to_bot_and_get_response(platform, url, event):
     bots = BOT_MAPPING.get(platform, [])
@@ -82,24 +85,32 @@ async def send_to_bot_and_get_response(platform, url, event):
     logger.error(f"{platform} için hiçbir bot yanıt vermedi")
     return None
 
-@client.on(events.NewMessage(outgoing=True, pattern=r'^\.(tiktok|reddit|twitter|youtube)\s+(https?://\S+)$'))
+@client.on(events.NewMessage(pattern=r'^\.(tiktok|reddit|twitter|youtube)\s+(https?://\S+)$'))
 async def handle_download_command(event):
     try:
         # Extract platform and URL
         command = event.pattern_match.group(1).lower()
         url = event.pattern_match.group(2)
         
-        # Delete the command message
-        await event.delete()
+        # Check if bot has permission to send messages in group
+        if not event.is_private:
+            chat = await event.get_chat()
+            if isinstance(chat, (InputPeerChannel, InputPeerUser)):
+                try:
+                    # Test if bot can send messages
+                    await client.send_message(event.chat_id, "⏳ İşleniyor...")
+                except Exception as e:
+                    await event.reply("❌ Bu grupta mesaj gönderme iznim yok. Lütfen yöneticilerden izin isteyin.")
+                    return
         
         # Notify user that processing has started
-        processing_msg = await event.respond(f"⏳ **{command.capitalize()}** içeriği indiriliyor...\n`{url}`")
+        processing_msg = await event.reply(f"⏳ **{command.capitalize()}** içeriği indiriliyor...\n`{url}`")
         
         # Send to appropriate bot and get response
         response = await send_to_bot_and_get_response(command, url, event)
         
         if response:
-            # Forward the response to the user
+            # Forward the response to the chat
             await client.forward_messages(event.chat_id, response)
             await processing_msg.delete()
         else:
@@ -108,32 +119,25 @@ async def handle_download_command(event):
     except Exception as e:
         logger.error(f"İndirme işlemi sırasında hata: {str(e)}", exc_info=True)
         error_msg = f"❌ **Bir hata oluştu**\n\n`{str(e)}`\n\nLütfen daha sonra tekrar deneyin."
-        await event.respond(error_msg)
+        await event.reply(error_msg)
 
-@client.on(events.NewMessage(outgoing=True, pattern=r'^\.help$'))
+@client.on(events.NewMessage(pattern=r'^\.help$'))
 async def handle_help_command(event):
     try:
-        # Delete the help command
-        await event.delete()
-        
         # Send the help message
-        await event.respond(HELP_MESSAGE)
+        await event.reply(HELP_MESSAGE)
         
     except Exception as e:
         logger.error(f"Yardım komutunda hata: {str(e)}", exc_info=True)
 
 async def main():
     # Print some info when connected
-    logger.info("UserBot başlatıldı!")
+    me = await client.get_me()
+    logger.info(f"Bot başlatıldı! ID: {me.id} - Kullanıcı adı: @{me.username}")
     logger.info(f"API ID: {API_ID}")
-    logger.info(f"Session: {SESSION_NAME}")
-    
-    # Start the client
-    await client.start()
-    logger.info("Oturum başarıyla başlatıldı!")
     
     # Set custom status
-    await client.send_message('me', '🤖 UserBot başarıyla başlatıldı!')
+    await client.send_message('me', '🤖 Bot başarıyla başlatıldı! Artık gruplarda da çalışıyor.')
     
     await client.run_until_disconnected()
 
@@ -141,6 +145,6 @@ if __name__ == '__main__':
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("UserBot kapatılıyor...")
+        logger.info("Bot kapatılıyor...")
     except Exception as e:
         logger.error(f"Ana işlevde hata: {str(e)}", exc_info=True)
