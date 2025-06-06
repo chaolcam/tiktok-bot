@@ -16,13 +16,13 @@ print(f"DEBUG: STRING_SESSION var mı?: {bool(STRING_SESSION)}") # String sessio
 # Global Client object is created.
 # "tiktok_downloader_bot" is used as the session name. This name is arbitrary.
 # API ID, API Hash, and String Session are retrieved from config.py and used to connect to Telegram.
-# BURADA DEĞİŞİKLİK YAPILDI: 'prefixes' yerine 'cmd_prefix' kullanıldı.
+# ÖN EK TANIMI BURADAN KALDIRILDI ve filters.command içine taşındı.
 app = Client(
     "tiktok_downloader_bot", # Oturum ismi
     api_id=API_ID,
     api_hash=API_HASH,
     session_string=STRING_SESSION,
-    cmd_prefix="." # Pyrogram'ın eski sürümlerinde komut ön eki için 'cmd_prefix' kullanılır.
+    # cmd_prefix="." # Bu satır buradan kaldırıldı
 )
 
 # Define a temporary folder for media downloads.
@@ -55,9 +55,9 @@ async def clean_download_directory():
 # ----------------------------------------------------------------------------------------------------
 
 # Pyrogram'ın '@app.on_message' dekoratörü kullanılarak, belirli bir komut algılandığında çalışacak asenkron fonksiyonlar tanımlanır.
-# filters.command("başla"): ".başla" komutunu algılar.
+# filters.command("başla", prefixes="."): ".başla" komutunu algılar ve sadece '.' ön ekine sahip olanları kabul eder.
 # filters.me: Sadece botun kendi gönderdiği mesajları dinler (userbot olduğu için).
-@app.on_message(filters.command("başla") & filters.me)
+@app.on_message(filters.command("başla", prefixes=".") & filters.me) # BURADA DEĞİŞİKLİK YAPILDI
 async def start_command(client, message):
     """
     '.başla' komutu algılandığında çalışır. Kullanıcıya botun ne işe yaradığını bildirir.
@@ -76,7 +76,7 @@ async def start_command(client, message):
         "resimler 10'lu gruplar halinde, videolar ise tek tek gönderilecektir."
     )
 
-@app.on_message(filters.command("tiktok") & filters.me)
+@app.on_message(filters.command("tiktok", prefixes=".") & filters.me) # BURADA DEĞİŞİKLİK YAPILDI
 async def download_tiktok_media(client, message):
     """
     '.tiktok <link>' komutu algılandığında TikTok medyasını indirir ve Telegram'a gönderir.
