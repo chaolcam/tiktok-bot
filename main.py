@@ -16,13 +16,13 @@ print(f"DEBUG: STRING_SESSION var mı?: {bool(STRING_SESSION)}") # String sessio
 # Global Client object is created.
 # "tiktok_downloader_bot" is used as the session name. This name is arbitrary.
 # API ID, API Hash, and String Session are retrieved from config.py and used to connect to Telegram.
-# BURADA DEĞİŞİKLİK YAPILDI: 'prefixes="."' eklendi.
+# BURADA DEĞİŞİKLİK YAPILDI: 'prefixes' yerine 'cmd_prefix' kullanıldı.
 app = Client(
     "tiktok_downloader_bot", # Oturum ismi
     api_id=API_ID,
     api_hash=API_HASH,
     session_string=STRING_SESSION,
-    prefixes=["."] # Buraya botun dinleyeceği komut ön eklerini ekliyoruz. '.' ile başlayan komutları dinleyecek.
+    cmd_prefix="." # Pyrogram'ın eski sürümlerinde komut ön eki için 'cmd_prefix' kullanılır.
 )
 
 # Define a temporary folder for media downloads.
