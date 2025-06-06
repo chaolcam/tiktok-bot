@@ -52,11 +52,13 @@ async def clean_download_directory():
 # Telegram Komutları
 # ----------------------------------------------------------------------------------------------------
 
+# Pyrogram'ın '@app.on_message' dekoratörü kullanılarak, belirli bir komut algılandığında çalışacak asenkron fonksiyonlar tanımlanır.
+# filters.command("başla"): ".başla" komutunu algılar.
+# filters.me: Sadece botun kendi gönderdiği mesajları dinler (userbot olduğu için).
 @app.on_message(filters.command("başla") & filters.me)
 async def start_command(client, message):
     """
     '.başla' komutu algılandığında çalışır. Kullanıcıya botun ne işe yaradığını bildirir.
-    filters.me: Sadece botun kendi gönderdiği mesajları dinler.
     Mesajın kendisi yanıtla düzenlenecektir.
     """
     # Bu satır Heroku loglarında botun komutu aldığını gösterir.
@@ -190,7 +192,10 @@ async def main():
         except Exception as e:
             print(f"Hata: Başlangıç mesajı gönderilemedi (muhtemelen 'me' ile ilgili sorun): {e}")
 
-        await app.idle() # Botu aktif tutar, komutları dinlemeye devam eder
+        # Pyrogram'ın idle() metodu yerine, asyncio'nun döngüsünü aktif tutan bir Future kullanıyoruz.
+        # Bu, botun sürekli olarak çalışmasını ve mesajları dinlemesini sağlar.
+        # Bu await işlemi, bot kapatılana kadar burada kalır.
+        await asyncio.Future() # Sonsuz bir döngüde botu aktif tutar.
         
     except Exception as e:
         # Botun başlangıcında veya çalışma sırasında oluşan kritik hataları yakalar ve loglar.
