@@ -1,4 +1,3 @@
-pyrogram==2.0.106
+pyrogram[speedups]==2.0.106 # Bu, Pyrogram'ın hızlandırma bağımlılıklarını (TgCrypto dahil) yükler.
 python-dotenv
 yt-dlp
-tglcrypto # Pyrogram'ın hızlandırmaları için gerekli olan kripto kütüphanesi
