@@ -8,11 +8,16 @@ import shutil
 import yt_dlp
 from config import API_ID, API_HASH, STRING_SESSION # config.py'den import edildi
 
+# DEBUG: Bot başlatılmadan önce API bilgilerini loglara yazdır
+print(f"DEBUG: Uygulama Başlatılıyor. Kullanılan API_ID: {API_ID}")
+print(f"DEBUG: Kullanılan API_HASH: {API_HASH[:5]}... (Gizlilik nedeniyle ilk 5 karakter)")
+print(f"DEBUG: STRING_SESSION var mı?: {bool(STRING_SESSION)}") # String session'ın boş olup olmadığını kontrol eder
+
 # Global Client object is created.
 # "tiktok_downloader_bot" is used as the session name. This name is arbitrary.
 # API ID, API Hash, and String Session are retrieved from config.py and used to connect to Telegram.
 app = Client(
-    "tiktok_downloader_bot", # Session name
+    "tiktok_downloader_bot", # Oturum ismi
     api_id=API_ID,
     api_hash=API_HASH,
     session_string=STRING_SESSION
@@ -46,6 +51,21 @@ async def clean_download_directory():
 # ----------------------------------------------------------------------------------------------------
 # Telegram Komutları
 # ----------------------------------------------------------------------------------------------------
+
+# Bot Telegram'a başarıyla bağlandığında çalışacak işleyici
+@app.on_ready
+async def on_bot_ready(client):
+    """
+    Bot Telegram'a başarıyla bağlandığında ve aktif olduğunda bu fonksiyon çalışır.
+    Bu, botun çalışıp çalışmadığını kesin olarak anlamak için kritik bir logdur.
+    """
+    print("INFO: Bot başarıyla Telegram'a bağlandı ve hazır! Userbotunuz artık komutları dinliyor.")
+    # Opsiyonel: Kendi hesabınıza botun başlatıldığına dair bir mesaj gönderebilirsiniz.
+    try:
+        await client.send_message("me", "Userbot başarıyla başlatıldı ve aktif!")
+    except Exception as e:
+        print(f"Hata: Başlangıç mesajı gönderilemedi: {e}")
+
 
 @app.on_message(filters.command("başla") & filters.me)
 async def start_command(client, message):
@@ -163,9 +183,9 @@ async def download_tiktok_media(client, message):
     finally:
         await clean_download_directory()
 
-print("Bot başlatılıyor...")
+print("Bot başlatılıyor... (Telegram'a bağlanılıyor)")
 try:
     app.run() # Botu başlatır ve mesajları dinler
 except Exception as e:
-    # Botun başlangıcında oluşan kritik hataları yakalar ve loglar.
-    print(f"KRİTİK HATA: Bot başlatılırken beklenmeyen bir hata oluştu: {e}")
+    # Botun başlangıcında veya çalışma sırasında oluşan kritik hataları yakalar ve loglar.
+    print(f"KRİTİK HATA: Bot başlatılırken veya çalışırken beklenmeyen bir hata oluştu: {e}")
