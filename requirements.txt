@@ -1,3 +1,4 @@
-pyrogram==2.0.106
-python-dotenv
-yt-dlp
+        pyrogram[speedups]==2.0.106 # TgCrypto ve aiohttp'yi yükler
+        python-dotenv
+        yt-dlp
+        
