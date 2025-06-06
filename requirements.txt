@@ -1,4 +1,4 @@
-        pyrogram[speedups]==2.0.106 # TgCrypto ve aiohttp'yi yükler
-        python-dotenv
-        yt-dlp
-        
+pyrogram==2.0.106
+python-dotenv
+yt-dlp
+tglcrypto # Pyrogram'ın hızlandırmaları için gerekli olan kripto kütüphanesi
