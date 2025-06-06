@@ -6,6 +6,8 @@ import re
 import glob
 import shutil
 import yt_dlp
+# BURADA API_ID, API_HASH ve STRING_SESSION'ı config.py dosyasından import ediyoruz.
+from config import API_ID, API_HASH, STRING_SESSION # <-- BU SATIR EKLENDİ VEYA DÜZELTİLDİ
 
 # Global Client object is created.
 # "tiktok_downloader_bot" is used as the session name. This name is arbitrary.
