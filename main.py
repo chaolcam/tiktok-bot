@@ -52,21 +52,6 @@ async def clean_download_directory():
 # Telegram Komutları
 # ----------------------------------------------------------------------------------------------------
 
-# Bot Telegram'a başarıyla bağlandığında çalışacak işleyici
-@app.on_ready
-async def on_bot_ready(client):
-    """
-    Bot Telegram'a başarıyla bağlandığında ve aktif olduğunda bu fonksiyon çalışır.
-    Bu, botun çalışıp çalışmadığını kesin olarak anlamak için kritik bir logdur.
-    """
-    print("INFO: Bot başarıyla Telegram'a bağlandı ve hazır! Userbotunuz artık komutları dinliyor.")
-    # Opsiyonel: Kendi hesabınıza botun başlatıldığına dair bir mesaj gönderebilirsiniz.
-    try:
-        await client.send_message("me", "Userbot başarıyla başlatıldı ve aktif!")
-    except Exception as e:
-        print(f"Hata: Başlangıç mesajı gönderilemedi: {e}")
-
-
 @app.on_message(filters.command("başla") & filters.me)
 async def start_command(client, message):
     """
@@ -183,9 +168,34 @@ async def download_tiktok_media(client, message):
     finally:
         await clean_download_directory()
 
-print("Bot başlatılıyor... (Telegram'a bağlanılıyor)")
-try:
-    app.run() # Botu başlatır ve mesajları dinler
-except Exception as e:
-    # Botun başlangıcında veya çalışma sırasında oluşan kritik hataları yakalar ve loglar.
-    print(f"KRİTİK HATA: Bot başlatılırken veya çalışırken beklenmeyen bir hata oluştu: {e}")
+# ----------------------------------------------------------------------------------------------------
+# Botu Başlatma Ana Fonksiyonu
+# ----------------------------------------------------------------------------------------------------
+
+async def main():
+    """
+    Botun ana başlangıç ve yaşam döngüsü fonksiyonu.
+    Botu başlatır, Telegram'a bağlanır ve aktif kalmasını sağlar.
+    """
+    print("Bot başlatılıyor... (Telegram'a bağlanılıyor)")
+    try:
+        await app.start() # Pyrogram istemcisini başlat ve Telegram'a bağlan
+        
+        # Bağlantı başarılı olduğunda bu mesajı loglara yazdır ve kendi hesabınıza gönder
+        print("INFO: Bot başarıyla Telegram'a bağlandı ve hazır! Userbotunuz artık komutları dinliyor.")
+        try:
+            # Kendi hesabınıza başlangıç mesajı göndermek için 'me' kullanın
+            # Bu mesaj botun gerçekten başladığının görsel bir teyidi olacaktır.
+            await app.send_message("me", "Userbot başarıyla başlatıldı ve aktif!")
+        except Exception as e:
+            print(f"Hata: Başlangıç mesajı gönderilemedi (muhtemelen 'me' ile ilgili sorun): {e}")
+
+        await app.idle() # Botu aktif tutar, komutları dinlemeye devam eder
+        
+    except Exception as e:
+        # Botun başlangıcında veya çalışma sırasında oluşan kritik hataları yakalar ve loglar.
+        print(f"KRİTİK HATA: Bot başlatılırken veya çalışırken beklenmeyen bir hata oluştu: {e}")
+
+if __name__ == "__main__":
+    # main() fonksiyonunu eşzamansız olarak çalıştırır.
+    asyncio.run(main())
