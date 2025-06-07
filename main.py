@@ -2,7 +2,7 @@ from pyrogram import Client, filters
 from pyrogram.types import InputMediaPhoto, InputMediaVideo
 import os
 import asyncio
-import re
+import re # Düzenli ifadeler (regex) için eklendi
 import glob
 import shutil
 import yt_dlp
@@ -16,7 +16,7 @@ print(f"DEBUG: STRING_SESSION var mı?: {bool(STRING_SESSION)}") # String sessio
 # Global Client object is created.
 # "tiktok_downloader_bot" is used as the session name. This name is arbitrary.
 # API ID, API Hash, and String Session are retrieved from config.py and used to connect to Telegram.
-# KOMUT ÖN EKİ TANIMI BURADAN KALDIRILDI VE MANUEL OLARAK FİLTRELEMEYE GEÇİLDİ.
+# KOMUT ÖN EKİ TANIMI BURADAN KALDIRILDI VE MANUEL OLARAK REGEX FİLTRELEMEYE GEÇİLDİ.
 app = Client(
     "tiktok_downloader_bot", # Oturum ismi
     api_id=API_ID,
@@ -37,17 +37,17 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 async def clean_download_directory():
     """
-    İndirme klasörünü temizler. Önceki indirmelerden kalan dosyaları siler.
-    Bu, Heroku'da disk alanı kullanımını optimize etmek için önemlidir.
+    Cleans the download directory. Deletes residual files from previous downloads.
+    This is important for optimizing disk space usage on Heroku.
     """
     for file_path in glob.glob(os.path.join(DOWNLOAD_DIR, "*")):
         try:
             if os.path.isfile(file_path) or os.path.islink(file_path):
-                os.unlink(file_path) # Dosyayı sil
+                os.unlink(file_path) # Delete the file
             elif os.path.isdir(file_path):
-                shutil.rmtree(file_path) # Klasörü ve içeriğini sil
+                shutil.rmtree(file_path) # Delete the directory and its contents
         except Exception as e:
-            print(f"Hata: Geçici dosya/klasör silinemedi '{file_path}'. Sebep: {e}")
+            print(f"Error: Could not delete temporary file/folder '{file_path}'. Reason: {e}")
 
 # ----------------------------------------------------------------------------------------------------
 # Telegram Komutları
@@ -55,17 +55,24 @@ async def clean_download_directory():
 
 # filters.text: Herhangi bir metin mesajını algılar.
 # filters.me: Sadece botun kendi gönderdiği mesajları dinler (userbot olduğu için).
-@app.on_message(filters.text & filters.me) # Komut filtresi burada daha genel hale getirildi.
-async def handle_all_my_messages(client, message):
+# Bu işleyici, botun kendi gönderdiği tüm metin mesajlarını yakalayacaktır.
+@app.on_message(filters.text & filters.me)
+async def command_handler(client, message):
     """
     Botun kendi gönderdiği tüm metin mesajlarını işler.
-    Komutları manuel olarak kontrol eder.
+    Belirtilen komut desenlerini (regex) manuel olarak kontrol eder.
     """
     message_text = message.text.strip() # Mesaj metnini alır ve baş/son boşlukları temizler.
 
     # '.başla' komutunu kontrol et
-    if message_text == ".başla":
-        print(f"DEBUG: '.başla' komutu manuel olarak algılandı. Mesaj ID: {message.id}, Gonderen: {message.from_user.id}") 
+    # r'^\.başla$' regex'i:
+    # ^ : Satırın başlangıcı
+    # \. : Nokta karakteri (özel karakter olduğu için kaçış karakteri ile belirtilir)
+    # başla : Tam olarak "başla" metni
+    # $ : Satırın sonu
+    # Bu, sadece ".başla" olan mesajları algılar, başında veya sonunda başka bir şey olmayan.
+    if re.match(r"^\.başla$", message_text, re.IGNORECASE): # re.IGNORECASE büyük/küçük harf duyarlılığını kapatır
+        print(f"DEBUG: '.başla' komutu manuel olarak regex ile algılandı. Mesaj ID: {message.id}, Gonderen: {message.from_user.id}") 
         await message.edit_text( # Kullanıcının kendi mesajını düzenler
             "Merhaba! Ben bir **TikTok indirici userbot**'uyum. "
             "Bana bir TikTok linki göndererek medya indirmemi sağlayabilirsin.\n\n"
@@ -76,10 +83,16 @@ async def handle_all_my_messages(client, message):
             "Unutma, videolar filigransız indirilecektir. Çoklu medya (carousel) gönderilerinde "
             "resimler 10'lu gruplar halinde, videolar ise tek tek gönderilecektir."
         )
-    # '.tiktok' komutunu kontrol et
-    elif message_text.startswith(".tiktok "): # '.tiktok ' boşluk ile başlamasına dikkat edin
-        print(f"DEBUG: '.tiktok' komutu manuel olarak algılandı. Mesaj ID: {message.id}, Gonderen: {message.from_user.id}") 
-        tiktok_link = message_text.split(" ", 1)[1] # Komut sonrası ilk boşluktan sonraki kısmı link olarak alır.
+    # '.tiktok <link>' komutunu kontrol et
+    # r"^\.tiktok\s+(.+)$" regex'i:
+    # ^ : Satırın başlangıcı
+    # \.tiktok : ".tiktok" metni
+    # \s+ : Bir veya daha fazla boşluk karakteri (komut ile link arasında boşluk olmalı)
+    # (.+) : Boşluklardan sonraki tüm karakterleri yakalar (link kısmı)
+    # $ : Satırın sonu
+    elif re_match_tiktok := re.match(r"^\.tiktok\s+(.+)$", message_text, re.IGNORECASE):
+        tiktok_link = re_match_tiktok.group(1) # Yakalanan link grubunu alır
+        print(f"DEBUG: '.tiktok' komutu manuel olarak regex ile algılandı. Mesaj ID: {message.id}, Gonderen: {message.from_user.id}, Link: {tiktok_link}") 
 
         # Kullanıcının mesajını indirme işleminin başladığını belirtmek için düzenler.
         status_message = await message.edit_text("`TikTok medyasını indiriyorum, lütfen bekleyin... ⌛`")
@@ -172,6 +185,8 @@ async def main():
         # Bağlantı başarılı olduğunda bu mesajı loglara yazdır ve kendi hesabınıza gönder
         print("INFO: Bot başarıyla Telegram'a bağlandı ve hazır! Userbotunuz artık komutları dinliyor.")
         try:
+            # Kendi hesabınıza başlangıç mesajı göndermek için 'me' kullanın
+            # Bu mesaj botun gerçekten başladığının görsel bir teyidi olacaktır.
             await app.send_message("me", "Userbot başarıyla başlatıldı ve aktif!")
         except Exception as e:
             print(f"Hata: Başlangıç mesajı gönderilemedi (muhtemelen 'me' ile ilgili sorun): {e}")
